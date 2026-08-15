@@ -1,0 +1,36 @@
+{
+  "name": "barkreels",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "author": {
+    "email": "amandeep.singh.fsd@gmail.com",
+    "name": "Amandeep Singh"
+  },
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "format": "prettier --write \"*.{js,jsx,ts,tsx,css,scss,html,md,json}\""
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "canvas-confetti": "^1.9.4",
+    "lucide-react": "^1.31.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  },
+  "dependencies": {
+    "@imgly/background-removal": "^1.7.0",
+    "mediabunny": "^1.54.0",
+    "prettier": "^3.9.6",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}

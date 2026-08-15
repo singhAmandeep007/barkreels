@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>BarkReels - render harness</title>
+    <style>
+      body {
+        background: #0b0f19;
+        color: #e5e7eb;
+        font:
+          13px ui-monospace,
+          monospace;
+        padding: 16px;
+      }
+      #log {
+        white-space: pre-wrap;
+        line-height: 1.6;
+      }
+      canvas {
+        border: 1px solid #333;
+        height: 520px;
+        image-rendering: auto;
+      }
+      .ok {
+        color: #34d399;
+      }
+      .bad {
+        color: #f87171;
+      }
+      .warn {
+        color: #fbbf24;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>Render harness (dev only)</h3>
+    <div id="log">booting…</div>
+    <div><canvas id="out"></canvas></div>
+    <script
+      type="module"
+      src="/src/devtest.ts"
+    ></script>
+  </body>
+</html>

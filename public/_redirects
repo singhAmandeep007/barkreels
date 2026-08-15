@@ -1,0 +1,4 @@
+# Ollama Cloud sends no CORS headers, so the browser cannot call it directly.
+# This host-level rewrite makes it same-origin. Pure config - no server code,
+# so the app stays "client-side only".
+/ollama-api/*  https://ollama.com/:splat  200
