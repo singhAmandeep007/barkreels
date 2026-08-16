@@ -17,10 +17,17 @@ export interface NormBox {
  */
 export interface DogAnchors {
   head: NormBox;
+  /**
+   * The mouth opening / lip line. Vision models reliably return the whole
+   * muzzle here instead, so `nose` exists to correct for that - see
+   * `jawHingeY` in the renderer.
+   */
   mouth: NormBox;
+  /** The nose leather. Its lower edge is the ceiling for jaw deformation. */
+  nose: NormBox | null;
   leftEye: NormBox | null;
   rightEye: NormBox | null;
-  /** Ears twitch independently — the cheapest signal that a still dog is alive. */
+  /** Ears twitch independently - the cheapest signal that a still dog is alive. */
   leftEar: NormBox | null;
   rightEar: NormBox | null;
   /** Rough pivot the body rotates about when rolling/bouncing. */
@@ -50,7 +57,7 @@ export type VoicePersonaId = "deep" | "playful" | "dramatic" | "sassy";
  *
  * `persona`  the vision model writes the monologue and picks a voice
  * `text`     the user writes the script; ElevenLabs speaks it
- * `record`   the user's own recording is embedded directly — ElevenLabs is
+ * `record`   the user's own recording is embedded directly - ElevenLabs is
  *            not called at all
  *
  * `record` therefore has no word timestamps, so subtitles are unavailable for
@@ -227,7 +234,7 @@ export interface CaptionConfig {
  * Backgrounds
  * ------------------------------------------------------------------ */
 
-export type BackgroundId = "original" | "blur" | "sunset" | "studio" | "park" | "neon" | "solid";
+export type BackgroundId = "original" | "blur" | "custom" | "sunset" | "studio" | "park" | "neon" | "solid";
 
 export interface BackgroundConfig {
   id: BackgroundId;
@@ -237,6 +244,9 @@ export interface BackgroundConfig {
   blurPx: number;
   /** Whether the background pulses with the audio envelope. */
   reactive: boolean;
+  /** User-supplied background image. Only used when `id` is `custom`. */
+  customImage: ImageBitmap | null;
+  customUrl: string;
 }
 
 /* ------------------------------------------------------------------ *
@@ -338,6 +348,8 @@ export const DEFAULT_BACKGROUND: BackgroundConfig = {
   color: "#F59E0B",
   blurPx: 28,
   reactive: true,
+  customImage: null,
+  customUrl: "",
 };
 
 export const DEFAULT_EXPORT: ExportConfig = {

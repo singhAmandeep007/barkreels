@@ -80,6 +80,7 @@ function parseAnchors(raw: Record<string, unknown> | undefined): DogAnchors | nu
   return {
     head,
     mouth,
+    nose: boxFrom1000(raw.nose),
     leftEye: boxFrom1000(raw.left_eye),
     rightEye: boxFrom1000(raw.right_eye),
     leftEar: boxFrom1000(raw.left_ear),
@@ -114,7 +115,7 @@ function coerceAnalysis(parsed: Record<string, unknown>): DogAnalysis {
  *
  * `monologue` and `suggestedVoice` are only requested when the user has asked
  * the model to write for them. When they're supplying their own script or
- * recording, asking anyway wastes tokens and — worse — invites the model to
+ * recording, asking anyway wastes tokens and - worse - invites the model to
  * spend its attention on comedy instead of on the anchor coordinates, which
  * are the part the animation genuinely can't work without.
  */
@@ -123,20 +124,22 @@ export function buildPrompt(includeWriting: boolean): string {
     ? `
 JOB 1 - Character: invent a funny, relatable inner monologue (2-4 sentences, under 320 characters) that would go viral as a Reel. Make it specific to what you actually see in THIS photo, not generic dog humour.
 `
-    : '';
+    : "";
 
   const writingFields = includeWriting
     ? `
   "monologue": "the funny inner monologue",
   "suggestedVoice": "one of: deep, playful, dramatic, sassy",`
-    : '';
+    : "";
 
-  return `You are a precise dog-photo annotator${includeWriting ? ' AND a hilarious dog whisperer' : ''}.
+  return `You are a precise dog-photo annotator${includeWriting ? " AND a hilarious dog whisperer" : ""}.
 ${writingJob}
-${includeWriting ? 'JOB 2 - ' : ''}Annotation: locate the dog's features. Report every box as [ymin, xmin, ymax, xmax] normalised to 0-1000.
+${includeWriting ? "JOB 2 - " : ""}Annotation: locate the dog's features. Report every box as [ymin, xmin, ymax, xmax] normalised to 0-1000.
 
 Be precise, because these coordinates drive the animation directly:
-- "mouth" must tightly enclose the muzzle and lower jaw ONLY. Do not include the eyes or forehead.
+- "nose" is the NOSE LEATHER only: the dark wet pad at the very tip of the snout. Nothing else.
+- "mouth" is the MOUTH LINE only: the seam where the upper and lower lips meet, and the chin below it. It sits BELOW the nose and must NOT overlap it. This is the single most common mistake - do not return the whole muzzle or snout here. If the lips are closed, box the visible lip seam and the chin under it.
+- Sanity check before answering: the top of "mouth" must be greater than the bottom of "nose". If it isn't, you have boxed the muzzle; redo it.
 - "left_ear" and "right_ear" cover each ear from its base on the skull to its tip. Left and right are from the VIEWER's perspective. If an ear is hidden or cropped out, use null.
 - "chest" is a single [y, x] point at the centre of the dog's chest.
 - If the photo is a profile view and a feature is not visible, use null rather than guessing.
@@ -150,6 +153,7 @@ Return ONLY this JSON, no markdown:
   "energy": 0.0 to 1.0 (0 = asleep, 1 = full zoomies),
   "anchors": {
     "head": [ymin, xmin, ymax, xmax],
+    "nose": [ymin, xmin, ymax, xmax],
     "mouth": [ymin, xmin, ymax, xmax],
     "left_eye": [ymin, xmin, ymax, xmax] or null,
     "right_eye": [ymin, xmin, ymax, xmax] or null,
@@ -369,6 +373,7 @@ async function analyzeWithOllama(
               type: "object",
               properties: {
                 head: { type: "array", items: { type: "number" } },
+                nose: { type: "array", items: { type: "number" } },
                 mouth: { type: "array", items: { type: "number" } },
                 left_eye: { type: "array", items: { type: "number" } },
                 right_eye: { type: "array", items: { type: "number" } },
@@ -438,11 +443,7 @@ async function analyzeWithOllama(
  * @param includeWriting  Ask the model to also write a monologue and pick a
  *   voice. False when the user is supplying their own script or recording.
  */
-export async function analyzeDogImage(
-  file: File | Blob,
-  config: ApiKeys,
-  includeWriting = true
-): Promise<DogAnalysis> {
+export async function analyzeDogImage(file: File | Blob, config: ApiKeys, includeWriting = true): Promise<DogAnalysis> {
   const provider: AiProvider = config.aiProvider ?? "gemini";
 
   if (provider === "ollama") {
@@ -455,12 +456,7 @@ export async function analyzeDogImage(
     );
   }
 
-  return analyzeWithGemini(
-    file,
-    config.geminiKey,
-    config.geminiModel || "gemini-flash-latest",
-    includeWriting
-  );
+  return analyzeWithGemini(file, config.geminiKey, config.geminiModel || "gemini-flash-latest", includeWriting);
 }
 
 /** Whether the current settings are complete enough to attempt an analysis. */

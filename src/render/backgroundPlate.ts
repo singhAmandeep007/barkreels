@@ -3,7 +3,7 @@
  *
  * The background layer cannot just be the original photo, because the original
  * photo still contains the dog. The moment the cutout parallaxes away from its
- * starting position it uncovers its own twin sitting in the plate behind it —
+ * starting position it uncovers its own twin sitting in the plate behind it -
  * a ghost that gets worse the more depth you add.
  *
  * So we erase the dog and fill the hole before anything else touches the
@@ -21,19 +21,19 @@
 
 /**
  * Canvas 2D premultiplies alpha when it downscales, which means a bilinear
- * halving already computes an alpha-weighted colour average — transparent
+ * halving already computes an alpha-weighted colour average - transparent
  * pixels contribute nothing rather than dragging the result toward black.
  * That's precisely the "pull" step, for free.
  */
 function halve(source: HTMLCanvasElement): HTMLCanvasElement {
-  const next = document.createElement('canvas');
+  const next = document.createElement("canvas");
   next.width = Math.max(1, Math.floor(source.width / 2));
   next.height = Math.max(1, Math.floor(source.height / 2));
 
-  const ctx = next.getContext('2d');
+  const ctx = next.getContext("2d");
   if (ctx) {
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(source, 0, 0, next.width, next.height);
   }
 
@@ -45,7 +45,7 @@ function halve(source: HTMLCanvasElement): HTMLCanvasElement {
  *
  * Segmentation masks feather at the edges, so the outermost ring of "dog"
  * pixels is only partially transparent and keeps a halo of the dog's own
- * colour. Dilating the hole a few pixels throws that fringe away — cheaper and
+ * colour. Dilating the hole a few pixels throws that fringe away - cheaper and
  * more reliable than trying to unmix the edge.
  */
 function dilateHole(
@@ -55,22 +55,27 @@ function dilateHole(
   height: number,
   spreadPx: number
 ): void {
-  ctx.globalCompositeOperation = 'destination-out';
+  ctx.globalCompositeOperation = "destination-out";
 
   // Eight offset stamps approximate a circular dilation well enough at these
   // radii, and cost eight draws instead of a per-pixel morphology pass.
   const offsets: [number, number][] = [
     [0, 0],
-    [spreadPx, 0], [-spreadPx, 0], [0, spreadPx], [0, -spreadPx],
-    [spreadPx * 0.7, spreadPx * 0.7], [-spreadPx * 0.7, spreadPx * 0.7],
-    [spreadPx * 0.7, -spreadPx * 0.7], [-spreadPx * 0.7, -spreadPx * 0.7],
+    [spreadPx, 0],
+    [-spreadPx, 0],
+    [0, spreadPx],
+    [0, -spreadPx],
+    [spreadPx * 0.7, spreadPx * 0.7],
+    [-spreadPx * 0.7, spreadPx * 0.7],
+    [spreadPx * 0.7, -spreadPx * 0.7],
+    [-spreadPx * 0.7, -spreadPx * 0.7],
   ];
 
   for (const [dx, dy] of offsets) {
     ctx.drawImage(cutout, dx, dy, width, height);
   }
 
-  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalCompositeOperation = "source-over";
 }
 
 export interface PlateOptions {
@@ -78,13 +83,40 @@ export interface PlateOptions {
   blurPx: number;
   /** Whether to blur at all. `original` backgrounds want a sharp plate. */
   blur: boolean;
+  /** Replaces the photo entirely. Drawn cover-fit at the source's size. */
+  customImage?: ImageBitmap | null;
+}
+
+/**
+ * Draw `image` cover-fit into a canvas matching the source photo's dimensions.
+ *
+ * Matching the source size matters more than it looks: every UV transform in
+ * the shader is derived from the photo's aspect ratio, so a plate of the same
+ * size drops straight in and needs no separate mapping.
+ */
+function drawCoverFit(image: ImageBitmap, width: number, height: number, blurPx: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+
+  const scale = Math.max(width / image.width, height / image.height);
+  const dw = image.width * scale;
+  const dh = image.height * scale;
+
+  if (blurPx > 0) ctx.filter = `blur(${scaleRadius(blurPx, width)}px)`;
+  ctx.drawImage(image, (width - dw) / 2, (height - dh) / 2, dw, dh);
+  ctx.filter = "none";
+
+  return canvas;
 }
 
 /**
  * Build the background plate: the photo with the dog removed, its hole filled,
  * and optionally blurred.
  *
- * Falls back to the plain photo when there's no cutout — there's nothing to
+ * Falls back to the plain photo when there's no cutout - there's nothing to
  * erase, and a ghost is impossible if the layers never separate.
  */
 export function buildBackgroundPlate(
@@ -95,24 +127,30 @@ export function buildBackgroundPlate(
   const width = source.width;
   const height = source.height;
 
-  const output = document.createElement('canvas');
+  // A user-supplied background replaces the photo wholesale, so there's
+  // nothing to erase and no hole to fill.
+  if (options.customImage) {
+    return drawCoverFit(options.customImage, width, height, options.blur ? options.blurPx : 0);
+  }
+
+  const output = document.createElement("canvas");
   output.width = width;
   output.height = height;
-  const outCtx = output.getContext('2d');
+  const outCtx = output.getContext("2d");
   if (!outCtx) return output;
 
   if (!cutout) {
     if (options.blur) outCtx.filter = `blur(${scaleRadius(options.blurPx, width)}px)`;
     outCtx.drawImage(source, 0, 0);
-    outCtx.filter = 'none';
+    outCtx.filter = "none";
     return output;
   }
 
   /* --- 1. Punch the dog out ---------------------------------------- */
-  const holed = document.createElement('canvas');
+  const holed = document.createElement("canvas");
   holed.width = width;
   holed.height = height;
-  const holeCtx = holed.getContext('2d');
+  const holeCtx = holed.getContext("2d");
   if (!holeCtx) return output;
 
   holeCtx.drawImage(source, 0, 0);
@@ -132,14 +170,14 @@ export function buildBackgroundPlate(
    * pixels that already hold real photo data.                           */
   for (let i = pyramid.length - 1; i > 0; i--) {
     const target = pyramid[i - 1];
-    const ctx = target.getContext('2d');
+    const ctx = target.getContext("2d");
     if (!ctx) continue;
 
-    ctx.globalCompositeOperation = 'destination-over';
+    ctx.globalCompositeOperation = "destination-over";
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(pyramid[i], 0, 0, target.width, target.height);
-    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalCompositeOperation = "source-over";
   }
 
   /* --- 4. Blur onto an opaque plate --------------------------------- */
@@ -147,7 +185,7 @@ export function buildBackgroundPlate(
     outCtx.filter = `blur(${scaleRadius(options.blurPx, width)}px)`;
   }
   outCtx.drawImage(pyramid[0], 0, 0);
-  outCtx.filter = 'none';
+  outCtx.filter = "none";
 
   return output;
 }

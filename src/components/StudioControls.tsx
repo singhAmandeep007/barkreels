@@ -18,6 +18,8 @@ interface StudioControlsProps {
   onCaptionsChange: (config: CaptionConfig) => void;
   /** False when the audio has no word timings (a user recording). */
   captionsAvailable: boolean;
+  /** Caption colours sampled from the photo, offered as one-click swatches. */
+  accentSwatches: string[];
   background: BackgroundConfig;
   onBackgroundChange: (config: BackgroundConfig) => void;
   exportConfig: ExportConfig;
@@ -26,7 +28,7 @@ interface StudioControlsProps {
 
 /**
  * Ordered least to most motion. `still` leads because it is the most
- * convincing for a portrait — the frame holds and only the face moves.
+ * convincing for a portrait - the frame holds and only the face moves.
  */
 const PRESET_META: { id: PresetId; label: string; emoji: string; desc: string }[] = [
   { id: "still", label: "Locked Off", emoji: "🗿", desc: "Only face moves" },
@@ -39,6 +41,7 @@ const PRESET_META: { id: PresetId; label: string; emoji: string; desc: string }[
 
 const BACKGROUNDS: { id: BackgroundId; label: string; swatch: string }[] = [
   { id: "blur", label: "Blurred", swatch: "from-gray-600 to-gray-800" },
+  { id: "custom", label: "Your own", swatch: "from-emerald-500 to-teal-700" },
   { id: "original", label: "Original", swatch: "from-gray-500 to-gray-700" },
   { id: "sunset", label: "Sunset", swatch: "from-orange-400 via-amber-300 to-purple-800" },
   { id: "studio", label: "Studio", swatch: "from-amber-400 to-amber-900" },
@@ -115,6 +118,7 @@ export function StudioControls({
   captions,
   onCaptionsChange,
   captionsAvailable,
+  accentSwatches,
   background,
   onBackgroundChange,
   exportConfig,
@@ -252,6 +256,46 @@ export function StudioControls({
           })}
         </div>
 
+        {background.id === "custom" && (
+          <div className="space-y-2">
+            <label className="flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-white/15 text-xs font-bold text-gray-400 hover:text-white hover:border-gray-600 transition-colors cursor-pointer">
+              <ImageIcon className="h-4 w-4" />
+              {background.customUrl ? "Change background image" : "Upload a background image"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  if (background.customUrl) URL.revokeObjectURL(background.customUrl);
+                  onBackgroundChange({
+                    ...background,
+                    customImage: await createImageBitmap(file),
+                    customUrl: URL.createObjectURL(file),
+                  });
+                }}
+              />
+            </label>
+            {background.customUrl && (
+              <img
+                src={background.customUrl}
+                alt="Background"
+                className="w-full h-20 object-cover rounded-xl border border-white/10"
+              />
+            )}
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-[11px] font-bold text-gray-400">Blur it</span>
+              <input
+                type="checkbox"
+                checked={background.blurPx > 0 && background.reactive === background.reactive}
+                onChange={(e) => onBackgroundChange({ ...background, blurPx: e.target.checked ? 28 : 0 })}
+                className="h-4 w-4 accent-amber-500 cursor-pointer"
+              />
+            </label>
+          </div>
+        )}
+
         {background.id === "blur" && (
           <Slider
             label="Blur strength"
@@ -295,9 +339,8 @@ export function StudioControls({
           // Explain rather than silently disable: an unexplained dead toggle
           // reads as a bug, and this one has a real reason behind it.
           <p className="text-[11px] text-gray-500 leading-relaxed">
-            Subtitles need per-word timings, which come from text-to-speech. Your own
-            recording doesn't carry them, so subtitles are unavailable for this clip.
-            Choose <strong className="text-gray-400">AI writes it</strong> or{" "}
+            Subtitles need per-word timings, which come from text-to-speech. Your own recording doesn't carry them, so
+            subtitles are unavailable for this clip. Choose <strong className="text-gray-400">AI writes it</strong> or{" "}
             <strong className="text-gray-400">I'll write it</strong> to get them back.
           </p>
         ) : (
@@ -352,6 +395,27 @@ export function StudioControls({
               format={(v) => `${Math.round(v * 100)}%`}
               onChange={(v) => onCaptionsChange({ ...captions, positionY: v })}
             />
+
+            {accentSwatches.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-gray-400 block">Picked from your photo</label>
+                <div className="flex gap-2 flex-wrap">
+                  {accentSwatches.map((color) => (
+                    <button
+                      key={color}
+                      onClick={() => onCaptionsChange({ ...captions, highlightColor: color })}
+                      title={color}
+                      className={`h-8 w-8 rounded-lg border-2 transition-transform hover:scale-110 ${
+                        captions.highlightColor.toLowerCase() === color.toLowerCase()
+                          ? "border-white scale-110"
+                          : "border-white/10"
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center gap-4">
               <div className="flex-1 flex items-center justify-between">

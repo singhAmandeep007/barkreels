@@ -195,11 +195,18 @@ export function deriveAnchors(box: NormBox | null): DogAnchors {
     h: b.h * 0.46,
   };
 
+  const nose: NormBox = {
+    x: head.x + head.w * 0.36,
+    y: head.y + head.h * 0.54,
+    w: head.w * 0.28,
+    h: head.h * 0.16,
+  };
+
   const mouth: NormBox = {
-    x: head.x + head.w * 0.28,
-    y: head.y + head.h * 0.58,
-    w: head.w * 0.44,
-    h: head.h * 0.3,
+    x: head.x + head.w * 0.3,
+    y: nose.y + nose.h,
+    w: head.w * 0.4,
+    h: head.h * 0.22,
   };
 
   const eyeW = head.w * 0.16;
@@ -216,12 +223,42 @@ export function deriveAnchors(box: NormBox | null): DogAnchors {
   return {
     head,
     mouth,
+    nose,
     leftEye: { x: head.x + head.w * 0.2, y: eyeY, w: eyeW, h: eyeH },
     rightEye: { x: head.x + head.w * 0.64, y: eyeY, w: eyeW, h: eyeH },
     leftEar: { x: head.x - earW * 0.15, y: earY, w: earW, h: earH },
     rightEar: { x: head.x + head.w - earW * 0.85, y: earY, w: earW, h: earH },
     chest: { x: b.x + b.w * 0.5, y: b.y + b.h * 0.72 },
   };
+}
+
+/**
+ * Where the mandible hinges, in normalised y.
+ *
+ * Vision models are asked for the mouth *line* but reliably return the whole
+ * muzzle - nose included - because on an animal "mouth" colloquially means the
+ * snout. Measured on real responses, the returned box routinely starts at the
+ * top of the nose, which put the peak of a centre-weighted warp squarely on the
+ * nose leather. A dog's nose does not move when it talks; this looked wrong in
+ * exactly the way people notice.
+ *
+ * So we don't trust the box's top edge. The hinge is pushed below the nose
+ * whenever we know where the nose is, and otherwise sits in the lower part of
+ * the reported box on the assumption that it's a muzzle.
+ */
+export function jawHingeY(anchors: DogAnchors): number {
+  const mouthTop = anchors.mouth.y;
+  const mouthBottom = anchors.mouth.y + anchors.mouth.h;
+
+  if (anchors.nose) {
+    const noseBottom = anchors.nose.y + anchors.nose.h;
+    // Just under the nose, but never so low there's no jaw left to move.
+    return Math.min(noseBottom, mouthBottom - anchors.mouth.h * 0.25);
+  }
+
+  // No nose reported: assume the box is a muzzle and hinge at 55% down it.
+  // That lands near the lip line on both a long snout and a flat face.
+  return mouthTop + anchors.mouth.h * 0.55;
 }
 
 /**
@@ -245,6 +282,7 @@ export function reconcileAnchors(fromModel: DogAnchors | null, fromMask: DogAnch
   return {
     head: valid(fromModel.head) ? fromModel.head : fromMask.head,
     mouth: valid(fromModel.mouth) ? fromModel.mouth : fromMask.mouth,
+    nose: valid(fromModel.nose) ? fromModel.nose : fromMask.nose,
     leftEye: valid(fromModel.leftEye) ? fromModel.leftEye : fromMask.leftEye,
     rightEye: valid(fromModel.rightEye) ? fromModel.rightEye : fromMask.rightEye,
     leftEar: valid(fromModel.leftEar) ? fromModel.leftEar : fromMask.leftEar,

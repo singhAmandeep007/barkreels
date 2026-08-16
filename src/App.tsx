@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Settings, Sparkles, Dog, Mic, ArrowLeft, Film, Layers } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Settings, Sparkles, Dog, Mic, ArrowLeft, Film, Layers, Type, Info, Check } from "lucide-react";
 
 import { SettingsModal } from "./components/SettingsModal";
 import { DropZone } from "./components/DropZone";
@@ -14,6 +14,7 @@ import { generateSpeech } from "./services/elevenlabs";
 import { segmentImage, deriveAnchors, reconcileAnchors, preloadSegmenter } from "./services/segmentation";
 import { analyzeAudio, getAudioDurationMs } from "./services/audioAnalysis";
 import { PRESETS, applyEnergy } from "./render/rig";
+import { extractAccentPalette } from "./render/accentColor";
 
 import {
   DEFAULT_API_KEYS,
@@ -28,6 +29,7 @@ import {
   type ExportConfig,
   type RigConfig,
   type VoiceConfig,
+  type VoiceSource,
   type WordTimestamp,
   type VideoProject,
 } from "./types";
@@ -227,10 +229,7 @@ export default function App() {
       // Word timestamps stop at the last syllable, and a recording has none at
       // all, so the decoded duration is the only reliable length. Without it
       // the export truncates the tail.
-      const [envelope, durationMs] = await Promise.all([
-        analyzeAudio(audioBlob),
-        getAudioDurationMs(audioBlob),
-      ]);
+      const [envelope, durationMs] = await Promise.all([analyzeAudio(audioBlob), getAudioDurationMs(audioBlob)]);
 
       setProject((prev) => ({
         ...prev,
@@ -259,6 +258,25 @@ export default function App() {
 
   const isAnalyzing = project.status === "analyzing" || project.status === "segmenting";
   const isGeneratingVoice = project.status === "generating-voice";
+  /* --- Caption colour sampled from the photo -------------------------- *
+   * Derived from the cutout so the background can't vote. Saturation is
+   * weighted heavily, which is what lets a small pink collar beat a large
+   * beige body.                                                            */
+  const accent = useMemo(() => {
+    if (!project.layers) return null;
+    return extractAccentPalette(project.layers.source, project.layers.cutout, project.layers.cutoutBox);
+  }, [project.layers]);
+
+  // Adopt the sampled colour once per photo, but never stomp on a colour the
+  // user picked themselves.
+  const appliedAccentFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!accent || appliedAccentFor.current === project.id) return;
+    appliedAccentFor.current = project.id;
+    setCaptions({ ...captions, highlightColor: accent.highlight });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accent, project.id]);
+
   // Subtitles require per-word timings, which only TTS produces.
   const captionsAvailable = (project.ttsResult?.wordTimestamps.length ?? 0) > 0;
 
@@ -359,28 +377,38 @@ export default function App() {
                   Start over
                 </button>
 
-                {project.analysis && (
-                  <DogInsights analysis={project.analysis} locked={!!project.ttsResult} />
-                )}
+                {project.analysis && <DogInsights analysis={project.analysis} />}
               </div>
 
               {/* Middle: the action panel */}
               <div className="lg:col-span-4 space-y-6">
                 {!project.analysis ? (
-                  <ActionCard
-                    icon={<Sparkles className="h-5 w-5 text-amber-500" />}
-                    title="Analyse the photo"
-                    body="A vision model works out the breed, the mood, a monologue, and where the muzzle and eyes sit - those coordinates are what the mouth animation deforms."
-                    ctaLabel="Start analysis"
-                    busyLabel={
-                      project.status === "segmenting" ? segmentLabel || "Isolating your dog…" : "Reading the portrait…"
-                    }
-                    busy={isAnalyzing}
-                    progress={project.status === "segmenting" ? segmentFraction : undefined}
-                    ready={keysReady}
-                    onOpenSettings={() => setShowSettings(true)}
-                    onAction={handleAnalyze}
-                  />
+                  <div className="space-y-5">
+                    <VoiceSourceChooser
+                      value={voice.source}
+                      onChange={(source) => setVoice({ ...voice, source })}
+                    />
+                    <ActionCard
+                      icon={<Sparkles className="h-5 w-5 text-amber-500" />}
+                      title="Analyse the photo"
+                      body={
+                        voice.source === "persona"
+                          ? "The model locates the nose, mouth, eyes and ears, and writes a monologue. Those coordinates are what the mouth animation deforms."
+                          : "The model locates the nose, mouth, eyes and ears. Those coordinates are what the mouth animation deforms - it won't write anything, since you're supplying the words."
+                      }
+                      ctaLabel="Start analysis"
+                      busyLabel={
+                        project.status === "segmenting"
+                          ? segmentLabel || "Isolating your dog…"
+                          : "Reading the portrait…"
+                      }
+                      busy={isAnalyzing}
+                      progress={project.status === "segmenting" ? segmentFraction : undefined}
+                      ready={keysReady}
+                      onOpenSettings={() => setShowSettings(true)}
+                      onAction={handleAnalyze}
+                    />
+                  </div>
                 ) : !project.ttsResult ? (
                   <VoicePanel
                     analysis={project.analysis}
@@ -401,6 +429,7 @@ export default function App() {
                     captions={captions}
                     onCaptionsChange={setCaptions}
                     captionsAvailable={captionsAvailable}
+                    accentSwatches={accent?.swatches ?? []}
                     background={background}
                     onBackgroundChange={setBackground}
                     exportConfig={exportConfig}
@@ -427,12 +456,7 @@ export default function App() {
                     fileLabel={fileLabel}
                     onExported={handleExported}
                   />
-                ) : (
-                  <PlaceholderReel
-                    imageUrl={project.imageUrls[project.activeImageIndex]}
-                    monologue={project.analysis?.monologue}
-                  />
-                )}
+                ) : null}
               </div>
             </div>
           </div>
@@ -552,37 +576,6 @@ function ActionCard({
   );
 }
 
-function PlaceholderReel({ imageUrl, monologue }: { imageUrl?: string; monologue?: string }) {
-  return (
-    <div className="w-full max-w-sm mx-auto">
-      <div className="bg-gray-900/90 p-3 rounded-[2.8rem] shadow-2xl border border-white/10">
-        <div className="relative aspect-[9/16] bg-gray-950 rounded-[2.2rem] overflow-hidden">
-          {imageUrl ? (
-            <img
-              src={imageUrl}
-              alt="Preview"
-              className="w-full h-full object-cover opacity-60"
-            />
-          ) : null}
-          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent" />
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 w-24 h-4 bg-black rounded-full" />
-
-          {monologue && (
-            <div className="absolute bottom-12 left-4 right-4 text-center">
-              <p className="text-amber-300 font-black text-base drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] leading-snug">
-                "{monologue}"
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-      <p className="text-center text-xs text-gray-600 font-semibold mt-4">
-        Your reel appears here once the voice is generated.
-      </p>
-    </div>
-  );
-}
-
 function Landing({ onImageSelect }: { onImageSelect: (files: File[]) => void }) {
   const features = [
     {
@@ -642,12 +635,116 @@ function Landing({ onImageSelect }: { onImageSelect: (files: File[]) => void }) 
         </div>
       </div>
 
-      <div className="lg:col-span-5 w-full">
+      <div className="lg:col-span-5 w-full space-y-4">
         <DropZone
           onImageSelect={onImageSelect}
           currentImage={null}
         />
+        <PhotoGuidance />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Asked *before* analysis, deliberately.
+ *
+ * The vision call is where "write me a monologue" gets requested, so the
+ * choice has to exist by then. Asking afterwards would mean either always
+ * generating a monologue the user may not want, or making a second call.
+ */
+function VoiceSourceChooser({ value, onChange }: { value: VoiceSource; onChange: (source: VoiceSource) => void }) {
+  const options: { id: VoiceSource; label: string; desc: string; icon: React.ReactNode }[] = [
+    {
+      id: "persona",
+      label: "Let the AI write it",
+      desc: "It invents a monologue from the photo, then speaks it",
+      icon: <Sparkles className="h-4 w-4" />,
+    },
+    {
+      id: "text",
+      label: "I'll write the words",
+      desc: "Your script, spoken in a voice you pick",
+      icon: <Type className="h-4 w-4" />,
+    },
+    {
+      id: "record",
+      label: "I'll use my own voice",
+      desc: "Your recording, embedded as-is. No subtitles",
+      icon: <Mic className="h-4 w-4" />,
+    },
+  ];
+
+  return (
+    <div className="glass-card p-6 rounded-3xl space-y-4">
+      <div>
+        <h3 className="text-lg font-black text-white">Where do the words come from?</h3>
+        <p className="text-xs text-gray-500 mt-1">Pick now - it changes what we ask the vision model for.</p>
+      </div>
+
+      <div className="space-y-2">
+        {options.map((o) => {
+          const active = value === o.id;
+          return (
+            <button
+              key={o.id}
+              onClick={() => onChange(o.id)}
+              className={`w-full flex items-start gap-3 p-3.5 rounded-xl border text-left transition-all ${
+                active
+                  ? "bg-gradient-to-r from-amber-500/10 to-rose-500/10 border-amber-500/50"
+                  : "bg-gray-950/40 border-white/5 hover:border-gray-700"
+              }`}
+            >
+              <span className={`mt-0.5 ${active ? "text-amber-500" : "text-gray-500"}`}>{o.icon}</span>
+              <div className="min-w-0">
+                <span className="block text-xs font-bold text-white">{o.label}</span>
+                <span className="block text-[10px] text-gray-500 mt-0.5">{o.desc}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What actually works, stated plainly.
+ *
+ * Every failure mode here is a real one: the rig deforms specific anchors, so
+ * a photo where those anchors aren't visible produces a dog whose face ripples
+ * in the wrong place. Saying so up front is cheaper than debugging it later.
+ */
+function PhotoGuidance() {
+  const rules = [
+    ["Head-on portrait", "Facing the camera. Profile shots hide one eye and one ear."],
+    ["Face fills the frame", "Head and shoulders. Full-body shots leave the muzzle too small to animate."],
+    ["Eyes, nose, mouth and ears clearly visible", "These are the exact points the animation moves."],
+    ["One dog", "Segmentation keeps a single subject; two dogs become one blob."],
+    ["Sharp and well lit", "Blur and deep shadow make the cutout edge mushy."],
+    ["No sunglasses, hands or toys over the face", "Anything covering an anchor gets deformed along with it."],
+  ];
+
+  return (
+    <div className="glass-card p-5 rounded-2xl space-y-3">
+      <h4 className="text-xs font-black text-white uppercase tracking-wide flex items-center gap-2">
+        <Info className="h-3.5 w-3.5 text-amber-500" />
+        What works best
+      </h4>
+      <ul className="space-y-2">
+        {rules.map(([title, why]) => (
+          <li
+            key={title}
+            className="flex gap-2 text-[11px] leading-relaxed"
+          >
+            <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-px" />
+            <span>
+              <span className="text-gray-300 font-semibold">{title}</span>
+              <span className="text-gray-500"> - {why}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

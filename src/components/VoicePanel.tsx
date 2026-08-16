@@ -9,7 +9,7 @@ interface VoicePanelProps {
   onGenerate: () => void;
   busy: boolean;
   busyLabel: string;
-  /** False when keys are missing — the panel offers settings instead. */
+  /** False when keys are missing - the panel offers settings instead. */
   ready: boolean;
   onOpenSettings: () => void;
 }
@@ -31,10 +31,16 @@ const PERSONAS: { id: VoicePersonaId; label: string; emoji: string; desc: string
 const MAX_SCRIPT = 600;
 
 export function VoicePanel({
-  analysis, voice, onChange, onGenerate, busy, busyLabel, ready, onOpenSettings,
+  analysis,
+  voice,
+  onChange,
+  onGenerate,
+  busy,
+  busyLabel,
+  ready,
+  onOpenSettings,
 }: VoicePanelProps) {
-  const set = <K extends keyof VoiceConfig>(key: K, value: VoiceConfig[K]) =>
-    onChange({ ...voice, [key]: value });
+  const set = <K extends keyof VoiceConfig>(key: K, value: VoiceConfig[K]) => onChange({ ...voice, [key]: value });
 
   /**
    * Seed the editable script from the model's monologue once it arrives, but
@@ -47,8 +53,7 @@ export function VoicePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis?.monologue]);
 
-  const canGenerate =
-    voice.source === "record" ? !!voice.recording : voice.script.trim().length > 0;
+  const canGenerate = voice.source === "record" ? !!voice.recording : voice.script.trim().length > 0;
 
   return (
     <div className="glass-card p-6 rounded-3xl space-y-5">
@@ -80,7 +85,10 @@ export function VoicePanel({
       </div>
 
       {voice.source === "record" ? (
-        <Recorder voice={voice} onChange={onChange} />
+        <Recorder
+          voice={voice}
+          onChange={onChange}
+        />
       ) : (
         <>
           <div className="space-y-2">
@@ -140,7 +148,10 @@ export function VoicePanel({
         {!ready ? (
           <>
             <p className="text-xs text-rose-400 font-semibold">Add your API keys to continue.</p>
-            <button onClick={onOpenSettings} className="gradient-btn w-full">
+            <button
+              onClick={onOpenSettings}
+              className="gradient-btn w-full"
+            >
               Set API keys
             </button>
           </>
@@ -173,13 +184,7 @@ export function VoicePanel({
  * Recorder
  * ------------------------------------------------------------------ */
 
-function Recorder({
-  voice,
-  onChange,
-}: {
-  voice: VoiceConfig;
-  onChange: (v: VoiceConfig) => void;
-}) {
+function Recorder({ voice, onChange }: { voice: VoiceConfig; onChange: (v: VoiceConfig) => void }) {
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -211,11 +216,9 @@ function Recorder({
       });
       streamRef.current = stream;
 
-      const mimeType = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/mp4",
-      ].find((m) => MediaRecorder.isTypeSupported(m));
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) =>
+        MediaRecorder.isTypeSupported(m)
+      );
 
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       const chunks: BlobPart[] = [];
@@ -277,9 +280,8 @@ function Recorder({
       <div className="flex items-start gap-2 rounded-xl p-3 bg-sky-500/5 border border-sky-500/20 text-[11px] text-gray-400 leading-relaxed">
         <Info className="h-4 w-4 text-sky-400 shrink-0 mt-0.5" />
         <span>
-          Your recording is embedded directly — ElevenLabs isn't called at all. The mouth still
-          animates from the audio's loudness, but subtitles need word timings that only TTS
-          provides, so they're off for recordings.
+          Your recording is embedded directly - ElevenLabs isn't called at all. The mouth still animates from the
+          audio's loudness, but subtitles need word timings that only TTS provides, so they're off for recordings.
         </span>
       </div>
 
@@ -311,7 +313,12 @@ function Recorder({
             <label className="flex items-center justify-center gap-2 text-xs font-bold text-gray-500 hover:text-white transition-colors cursor-pointer">
               <Upload className="h-3.5 w-3.5" />
               or upload an audio file
-              <input type="file" accept="audio/*" onChange={handleUpload} className="hidden" />
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={handleUpload}
+                className="hidden"
+              />
             </label>
           )}
         </div>
@@ -327,9 +334,7 @@ function Recorder({
 
           <div className="min-w-0 flex-1">
             <p className="text-xs font-bold text-white">Recording ready</p>
-            <p className="text-[10px] text-gray-500">
-              {(voice.recording.size / 1024).toFixed(0)} kB
-            </p>
+            <p className="text-[10px] text-gray-500">{(voice.recording.size / 1024).toFixed(0)} kB</p>
           </div>
 
           <button

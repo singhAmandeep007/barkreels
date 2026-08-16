@@ -37,6 +37,7 @@ import type {
 import { evaluateRig, buildRigTables, type RigTables } from "./rig";
 import { drawCaptions } from "./captions";
 import { buildBackgroundPlate } from "./backgroundPlate";
+import { jawHingeY } from "../services/segmentation";
 
 /* ------------------------------------------------------------------ *
  * Shaders
@@ -88,6 +89,7 @@ uniform vec4 u_rightEye;
 uniform vec4 u_leftEar;
 uniform vec4 u_rightEar;
 uniform vec2 u_chest;
+uniform float u_jawHinge;
 uniform float u_earL;
 uniform float u_earR;
 
@@ -124,25 +126,50 @@ float noise(vec2 p) {
  * ---------------------------------------------------------------- */
 
 /* Jaw.
-   Inside an ellipse around the muzzle, pull the sample point upwards so the
-   pixels there appear to travel downwards - an opening mouth. The vertical
-   gate confines the effect to the lower half of the box, because a dog's
-   upper jaw doesn't move; only the mandible drops. Without that gate the
-   whole snout inflates and it reads as a balloon rather than a mouth. */
+
+   Anatomical, not radial. The previous version used an ellipse centred on the
+   reported mouth box, so displacement peaked at the box CENTRE and fell to zero
+   at its edges. Since vision models return the whole muzzle rather than the lip
+   line, that put maximum deformation on the nose and almost none on the actual
+   mouth - exactly inverted.
+
+   A real mandible rotates about a hinge behind the jaw. Nothing above the hinge
+   moves at all, and displacement grows with distance below it, so the chin
+   travels furthest. That single change is what makes it read as speech instead
+   of as a rippling snout.
+
+   u_jawHinge is a normalised y derived in segmentation.ts, forced below the
+   nose whenever the nose is known. */
 vec2 applyJaw(vec2 uv, float amount) {
   if (amount <= 0.0001) return uv;
 
-  vec2 centre = u_mouthBox.xy + u_mouthBox.zw * 0.5;
-  vec2 radius = u_mouthBox.zw * 0.85;
-  vec2 d = (uv - centre) / max(radius, vec2(0.0001));
+  float below = uv.y - u_jawHinge;
+  if (below <= 0.0) return uv;   // nose, eyes, forehead: untouched, always
 
-  float dist = length(d);
-  if (dist > 1.0) return uv;
+  float centreX = u_mouthBox.x + u_mouthBox.z * 0.5;
+  float chinBottom = u_mouthBox.y + u_mouthBox.w;
+  float jawLength = max(chinBottom - u_jawHinge, 0.02);
 
-  float falloff = 1.0 - smoothstep(0.0, 1.0, dist);
-  float gate = smoothstep(-0.25, 0.55, d.y);
+  // Lever arm: 0 at the hinge, 1 at the chin. Linear, because a rotation about
+  // a distant pivot is very nearly linear over a region this small.
+  float lever = clamp(below / jawLength, 0.0, 1.0);
 
-  uv.y -= amount * u_mouthBox.w * falloff * gate;
+  // Past the chin, taper back to zero so the neck and chest don't stretch.
+  float tail = 1.0 - smoothstep(1.0, 2.2, below / jawLength);
+
+  // Across the face: full in the middle, easing out past the jaw corners.
+  float hx = abs(uv.x - centreX) / max(u_mouthBox.z * 0.75, 0.0001);
+  float across = 1.0 - smoothstep(0.55, 1.15, hx);
+
+  float weight = lever * tail * across;
+
+  // Sampling upward makes the pixels travel downward: the jaw drops open.
+  uv.y -= amount * jawLength * weight;
+
+  // Mouth corners draw slightly inward as the jaw drops, which is what stops a
+  // wide-open mouth reading as a stretched rectangle.
+  uv.x += (uv.x - centreX) * amount * 0.16 * weight;
+
   return uv;
 }
 
@@ -260,7 +287,7 @@ void main() {
 
   if (u_bgMode == 0 || u_bgMode == 1) {
     // Both the sharp and blurred backgrounds read from the inpainted plate,
-    // never the raw photo — the raw photo still contains the dog, and the
+    // never the raw photo - the raw photo still contains the dog, and the
     // moment the cutout parallaxes away it would uncover its own twin.
     bg = texture(u_plate, clamp(bgUV, 0.0, 1.0)).rgb;
     if (u_bgMode == 1) bg *= 0.86;
@@ -310,7 +337,7 @@ void main() {
 
   // NOTE: there used to be a "contact shadow" here that sampled the cutout's
   // alpha at an offset and darkened the background with it. That is by
-  // construction a displaced copy of the whole silhouette — a ghost, not a
+  // construction a displaced copy of the whole silhouette - a ghost, not a
   // shadow. Real contact shadows pool on the ground; most of our inputs are
   // head-and-shoulders portraits with no visible ground at all, so the honest
   // answer is to draw nothing and let the inpainted plate carry the scene.
@@ -366,6 +393,7 @@ function uploadBlank(gl: WebGL2RenderingContext, tex: WebGLTexture): void {
 }
 
 const BG_MODES: Record<string, number> = {
+  custom: 0,
   original: 0,
   blur: 1,
   sunset: 2,
@@ -461,6 +489,7 @@ export class FrameRenderer {
       "u_plate",
       "u_leftEar",
       "u_rightEar",
+      "u_jawHinge",
       "u_earL",
       "u_earR",
       "u_hasCutout",
@@ -513,13 +542,14 @@ export class FrameRenderer {
 
     // Only the photo-derived backgrounds need a plate; the procedural ones
     // never sample it, and inpainting is the most expensive setup step here.
-    if (background.id === "blur" || background.id === "original") {
+    if (background.id === "blur" || background.id === "original" || background.id === "custom") {
       upload(
         gl,
         this.texPlate,
         buildBackgroundPlate(layers.source, layers.cutout, {
           blurPx: background.blurPx,
           blur: background.id === "blur",
+          customImage: background.id === "custom" ? background.customImage : null,
         })
       );
     } else {
@@ -621,6 +651,7 @@ export class FrameRenderer {
     const rear = anchors.rightEar;
     gl.uniform4f(u.u_leftEar, lear?.x ?? 0, lear?.y ?? 0, lear?.w ?? 0, lear?.h ?? 0);
     gl.uniform4f(u.u_rightEar, rear?.x ?? 0, rear?.y ?? 0, rear?.w ?? 0, rear?.h ?? 0);
+    gl.uniform1f(u.u_jawHinge, jawHingeY(anchors));
     gl.uniform1f(u.u_earL, state.earLeft);
     gl.uniform1f(u.u_earR, state.earRight);
 

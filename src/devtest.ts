@@ -256,7 +256,15 @@ async function main() {
   expRenderer.dispose();
   log("\nDONE", "ok");
 
-  (window as unknown as { __result: Blob }).__result = result.blob;
+  // Exposed so the ghosting check can be driven interactively: the artifact
+  // only shows when the layers separate, which needs a high-parallax preset.
+  Object.assign(window, {
+    __result: result.blob,
+    __renderer: renderer,
+    __ctx: ctx,
+    __presets: PRESETS,
+    __duration: DURATION,
+  });
 }
 
 main().catch((err) => {

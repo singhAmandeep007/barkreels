@@ -1,18 +1,11 @@
-import { Sparkles, Hash, Lock } from "lucide-react";
+import { Sparkles, Hash } from "lucide-react";
 import type { DogAnalysis } from "../types";
 
 interface DogInsightsProps {
   analysis: DogAnalysis;
-  /**
-   * Once the voiceover exists, the analysis is baked into it — the timestamps,
-   * the envelope and the caption timings all derive from that exact audio.
-   * Showing an editable panel at that point invites changes that silently do
-   * nothing, so we mark it locked instead.
-   */
-  locked: boolean;
 }
 
-export function DogInsights({ analysis, locked }: DogInsightsProps) {
+export function DogInsights({ analysis }: DogInsightsProps) {
   const facts = [
     { label: "Breed guess", value: analysis.breed },
     { label: "Mood", value: analysis.mood },
@@ -28,12 +21,6 @@ export function DogInsights({ analysis, locked }: DogInsightsProps) {
           <Sparkles className="h-5 w-5 text-amber-500" />
           Portrait insights
         </h3>
-        {locked && (
-          <span className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase tracking-wide">
-            <Lock className="h-3 w-3" />
-            Locked
-          </span>
-        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
