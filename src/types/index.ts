@@ -294,7 +294,6 @@ export interface ApiKeys {
   geminiKey: string;
   aiProvider: AiProvider;
   geminiModel: string;
-  ollamaUrl: string;
   ollamaModel: string;
   ollamaKey: string;
 }
@@ -315,8 +314,6 @@ export const DEFAULT_API_KEYS: ApiKeys = {
   geminiKey: "",
   aiProvider: "gemini",
   geminiModel: "gemini-flash-latest",
-  // Empty means "Ollama Cloud via the same-origin rewrite" - see services/vision.ts.
-  ollamaUrl: "",
   // Must be a model Ollama *Cloud* hosts, since that's the default endpoint.
   // qwen3-vl and llama3.2-vision are local-only and 404 here; gemma4:31b is
   // the lightest cloud-hosted vision model.

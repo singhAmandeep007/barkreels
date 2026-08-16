@@ -179,14 +179,14 @@ the subtitles and the mouth animation.
 
 **Google Gemini** - get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
-**Ollama** - either:
+**Ollama Cloud** - get a key at
+[ollama.com/settings/keys](https://ollama.com/settings/keys).
 
-- **Local**: set the URL to `http://localhost:11434` and start Ollama with
-  `OLLAMA_ORIGINS="*"` so the browser is allowed to call it. Nothing leaves
-  your machine.
-- **Cloud**: leave the URL blank and supply an Ollama API key.
-
-Use a vision-capable model (`gemma3:12b`).
+Cloud only; there is no local-instance mode. The model list is discovered from
+`/api/tags` at runtime rather than hardcoded, and filtered to vision-capable
+models — Cloud serves a small catalogue of large models, and the popular local
+vision models (`qwen3-vl`, `llama3.2-vision`) are **not** in it. `gemma4:31b`
+is the lightest cloud vision option and the default.
 
 #### Why Ollama Cloud needs a rewrite
 

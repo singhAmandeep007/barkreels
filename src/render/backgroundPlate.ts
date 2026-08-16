@@ -94,6 +94,24 @@ export interface PlateOptions {
  * the shader is derived from the photo's aspect ratio, so a plate of the same
  * size drops straight in and needs no separate mapping.
  */
+/**
+ * Whether a value is something `drawImage` will actually accept.
+ *
+ * Guards against a deserialised `{}` masquerading as an ImageBitmap: it's
+ * truthy, it passes a `!= null` check, and it throws a TypeError deep inside
+ * canvas where the stack points at the renderer rather than at the config that
+ * caused it.
+ */
+export function isDrawable(value: unknown): value is ImageBitmap {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as ImageBitmap).width === "number" &&
+    typeof (value as ImageBitmap).height === "number" &&
+    (value as ImageBitmap).width > 0
+  );
+}
+
 function drawCoverFit(image: ImageBitmap, width: number, height: number, blurPx: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -129,7 +147,13 @@ export function buildBackgroundPlate(
 
   // A user-supplied background replaces the photo wholesale, so there's
   // nothing to erase and no hole to fill.
-  if (options.customImage) {
+  //
+  // The truthiness check has to be a real type check, not `if (customImage)`.
+  // Background config is persisted to localStorage, and an ImageBitmap survives
+  // JSON.stringify as `{}` — truthy, and fatal the moment drawImage sees it.
+  // The config layer strips it on save now, but a plate that throws takes the
+  // whole preview down with it, so this stays as a second line of defence.
+  if (isDrawable(options.customImage)) {
     return drawCoverFit(options.customImage, width, height, options.blur ? options.blurPx : 0);
   }
 

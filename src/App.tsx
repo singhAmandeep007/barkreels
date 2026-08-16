@@ -7,6 +7,7 @@ import { DogInsights } from "./components/DogInsights";
 import { VoicePanel } from "./components/VoicePanel";
 import { StepIndicator } from "./components/StepIndicator";
 import { StudioPreview } from "./components/StudioPreview";
+import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { StudioControls } from "./components/StudioControls";
 
 import { analyzeDogImage, hasVisionConfig } from "./services/vision";
@@ -34,13 +35,32 @@ import {
   type VideoProject,
 } from "./types";
 
-function useLocalStorage<T>(key: string, initial: T): [T, (v: T) => void] {
+/**
+ * State that survives a reload.
+ *
+ * `transient` names fields that must never be written to storage. This is not
+ * an optimisation — it's a correctness requirement. Live objects like
+ * `ImageBitmap` and blob: URLs serialise to `{}` and to dead strings, and both
+ * come back *truthy but invalid*, which is far worse than coming back missing:
+ * the app confidently hands `{}` to `drawImage` and throws inside canvas, with
+ * a stack that points at the renderer rather than at the storage that caused
+ * it. Stripping them on write means a reload degrades to the default instead.
+ */
+function useLocalStorage<T extends object>(
+  key: string,
+  initial: T,
+  transient: (keyof T)[] = []
+): [T, (v: T) => void] {
   const [value, setValue] = useState<T>(() => {
     try {
       const stored = window.localStorage.getItem(key);
+      if (!stored) return initial;
       // Merge rather than replace: a stored object written by an older build
       // may be missing fields this one requires.
-      return stored ? { ...initial, ...JSON.parse(stored) } : initial;
+      const parsed = { ...initial, ...JSON.parse(stored) };
+      // Belt and braces for anything written by a build that lacked the strip.
+      for (const field of transient) parsed[field] = initial[field];
+      return parsed;
     } catch {
       return initial;
     }
@@ -50,10 +70,13 @@ function useLocalStorage<T>(key: string, initial: T): [T, (v: T) => void] {
     (next: T) => {
       setValue(next);
       try {
-        window.localStorage.setItem(key, JSON.stringify(next));
+        const persistable = { ...next };
+        for (const field of transient) delete persistable[field];
+        window.localStorage.setItem(key, JSON.stringify(persistable));
       } catch {
         /* quota or private mode - the app still works, it just won't persist */
       }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
     [key]
   );
@@ -78,7 +101,13 @@ const emptyProject = (): VideoProject => ({
 export default function App() {
   const [apiKeys, setApiKeys] = useLocalStorage<ApiKeys>("barkreels-api-keys", DEFAULT_API_KEYS);
   const [captions, setCaptions] = useLocalStorage<CaptionConfig>("barkreels-captions", DEFAULT_CAPTIONS);
-  const [background, setBackground] = useLocalStorage<BackgroundConfig>("barkreels-background", DEFAULT_BACKGROUND);
+  // customImage is an ImageBitmap and customUrl is a blob: URL — neither
+  // survives a reload, so neither may be written to storage.
+  const [background, setBackground] = useLocalStorage<BackgroundConfig>(
+    "barkreels-background",
+    DEFAULT_BACKGROUND,
+    ["customImage", "customUrl"]
+  );
   const [exportConfig, setExportConfig] = useLocalStorage<ExportConfig>("barkreels-export", DEFAULT_EXPORT);
 
   // `still` is the default: for a portrait photo it's the most convincing
@@ -441,21 +470,23 @@ export default function App() {
               {/* Right: the reel */}
               <div className="lg:col-span-4 w-full lg:sticky lg:top-24">
                 {readyToRender ? (
-                  <StudioPreview
-                    layers={project.layers!}
-                    anchors={anchors!}
-                    words={project.ttsResult!.wordTimestamps}
-                    envelope={project.envelope}
-                    audioBlob={project.ttsResult!.audioBlob}
-                    audioUrl={project.ttsResult!.audioUrl}
-                    durationSec={project.ttsResult!.durationMs / 1000}
-                    rigConfig={rigConfig}
-                    captions={captionsAvailable ? captions : { ...captions, enabled: false }}
-                    background={background}
-                    exportConfig={exportConfig}
-                    fileLabel={fileLabel}
-                    onExported={handleExported}
-                  />
+                  <RenderErrorBoundary resetKey={project.id}>
+                    <StudioPreview
+                      layers={project.layers!}
+                      anchors={anchors!}
+                      words={project.ttsResult!.wordTimestamps}
+                      envelope={project.envelope}
+                      audioBlob={project.ttsResult!.audioBlob}
+                      audioUrl={project.ttsResult!.audioUrl}
+                      durationSec={project.ttsResult!.durationMs / 1000}
+                      rigConfig={rigConfig}
+                      captions={captionsAvailable ? captions : { ...captions, enabled: false }}
+                      background={background}
+                      exportConfig={exportConfig}
+                      fileLabel={fileLabel}
+                      onExported={handleExported}
+                    />
+                  </RenderErrorBoundary>
                 ) : null}
               </div>
             </div>
@@ -464,7 +495,16 @@ export default function App() {
 
         <footer className="mt-24 pb-8 text-center border-t border-white/5 pt-8">
           <p className="text-gray-600 text-xs font-semibold">
-            Built for the{" "}
+            Made by{" "}
+            <a
+              href="https://singhamandeep007.github.io/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-amber-500 hover:text-amber-400 underline"
+            >
+              Amandeep Singh
+            </a>{" "}
+            for{" "}
             <a
               href="https://dev.to/challenges/weekend-2026-08-13"
               target="_blank"
@@ -603,11 +643,6 @@ function Landing({ onImageSelect }: { onImageSelect: (files: File[]) => void }) 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center py-4 animate-fade-in max-w-6xl mx-auto">
       <div className="lg:col-span-7 space-y-8">
-        <div className="inline-flex items-center gap-2.5 bg-amber-500/10 border border-amber-500/20 px-4 py-2 rounded-full text-xs text-amber-400 font-extrabold">
-          <Sparkles className="h-3.5 w-3.5 animate-pulse" />
-          DEV Weekend Challenge entry
-        </div>
-
         <div className="space-y-4">
           <h2 className="text-5xl lg:text-7xl font-black text-white leading-none tracking-tight">
             Give your dog <br />
@@ -664,7 +699,7 @@ function VoiceSourceChooser({ value, onChange }: { value: VoiceSource; onChange:
     {
       id: "text",
       label: "I'll write the words",
-      desc: "Your script, spoken in a voice you pick",
+      desc: "Your script in any language, spoken in a voice you pick",
       icon: <Type className="h-4 w-4" />,
     },
     {
@@ -679,7 +714,6 @@ function VoiceSourceChooser({ value, onChange }: { value: VoiceSource; onChange:
     <div className="glass-card p-6 rounded-3xl space-y-4">
       <div>
         <h3 className="text-lg font-black text-white">Where do the words come from?</h3>
-        <p className="text-xs text-gray-500 mt-1">Pick now - it changes what we ask the vision model for.</p>
       </div>
 
       <div className="space-y-2">

@@ -7,12 +7,11 @@
  *   Gemini  Called directly from the browser. Google's generativelanguage
  *           endpoint sends permissive CORS headers, so no proxy is needed.
  *
- *   Ollama  Local instances work directly (the user must start Ollama with
- *           OLLAMA_ORIGINS set). Ollama Cloud does *not* send CORS headers -
- *           its OPTIONS handler returns 405 - so cloud traffic is routed
- *           through a same-origin `/ollama-api` path that Vite rewrites in dev
- *           and the static host rewrites in production. No server code either
- *           way; see vite.config.ts, public/_redirects and vercel.json.
+ *   Ollama  Ollama Cloud only. It does *not* send CORS headers — its OPTIONS
+ *           handler returns 405 — so every call is routed through a
+ *           same-origin `/ollama-api` path that Vite rewrites in dev and the
+ *           static host rewrites in production. Pure config, no server code;
+ *           see vite.config.ts, public/_redirects and vercel.json.
  */
 
 import type { AiProvider, ApiKeys, DogAnalysis, DogAnchors, NormBox } from "../types";
@@ -258,37 +257,27 @@ async function analyzeWithGemini(
  * ------------------------------------------------------------------ */
 
 /**
- * Resolve the endpoint the browser should actually hit.
+ * Ollama Cloud is reached through a same-origin path, never directly.
  *
- * An empty or ollama.com URL becomes the same-origin `/ollama-api` path, which
- * sidesteps the missing CORS headers on Ollama Cloud. Local URLs are used
- * verbatim - localhost speaks CORS fine once OLLAMA_ORIGINS is set.
+ * ollama.com returns 405 on OPTIONS and sends no CORS headers, so the browser
+ * refuses the preflight for any authenticated JSON POST. A host rewrite maps
+ * this path onto ollama.com — Vite in dev, `_redirects` / `vercel.json` in
+ * production. Pure config, no server code, so the app stays client-only.
  */
-export function resolveOllamaEndpoint(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, "");
-  if (!trimmed || /^https?:\/\/(www\.)?ollama\.com$/i.test(trimmed)) {
-    return "/ollama-api";
-  }
-  return trimmed;
-}
-
-export function isLocalOllama(url: string): boolean {
-  return /localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]/i.test(url);
-}
+export const OLLAMA_ENDPOINT = "/ollama-api";
 
 /**
  * Ask the server which models it actually has.
  *
  * Hardcoding model names is how you end up shipping a 404: Ollama Cloud hosts
- * a small catalogue of large models, and popular local vision models
- * (`qwen3-vl`, `llama3.2-vision`) are simply not in it. A local instance, by
- * contrast, has whatever the user happened to pull. Neither list is knowable
- * ahead of time, so we ask.
+ * a small catalogue of large models, and the popular local vision models
+ * (`qwen3-vl`, `llama3.2-vision`) are simply not in it. The catalogue also
+ * changes without notice, so we ask rather than guess.
  *
- * `/api/tags` answers for both, and needs no auth on Cloud.
+ * `/api/tags` needs no auth on Cloud, but we send the key when we have one.
  */
-export async function listOllamaModels(url: string, apiKey: string): Promise<string[]> {
-  const endpoint = resolveOllamaEndpoint(url);
+export async function listOllamaModels(apiKey: string): Promise<string[]> {
+  const endpoint = OLLAMA_ENDPOINT;
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
@@ -332,13 +321,12 @@ export function partitionVisionModels(models: string[]): {
 
 async function analyzeWithOllama(
   file: File | Blob,
-  url: string,
   model: string,
   apiKey: string,
   includeWriting: boolean
 ): Promise<DogAnalysis> {
   const base64 = await fileToBase64(file);
-  const endpoint = resolveOllamaEndpoint(url);
+  const endpoint = OLLAMA_ENDPOINT;
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
@@ -394,24 +382,19 @@ async function analyzeWithOllama(
     // fetch() rejects rather than returning a response when CORS blocks it, so
     // this branch is almost always a CORS or connectivity problem.
     throw new Error(
-      isLocalOllama(url)
-        ? `Could not reach Ollama at ${url}. Is it running, and did you start it with OLLAMA_ORIGINS="*"?`
-        : "Could not reach Ollama Cloud. The /ollama-api rewrite must be configured on your host (see README)."
+      "Could not reach Ollama Cloud. The /ollama-api rewrite must be configured on your host (see README)."
     );
   }
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
 
-    // "model not found" is by far the most common failure, and the raw message
-    // doesn't explain the actual cause: Ollama Cloud hosts a small catalogue of
-    // large models, and the popular local vision models are not in it. Telling
-    // the user to pull a model they cannot pull would waste their time.
+    // "model not found" is the most common failure here, and the raw message
+    // doesn't explain why: Cloud serves a small catalogue of large models, and
+    // the popular local vision models simply aren't in it.
     if (response.status === 404 || /not found/i.test(text)) {
       throw new Error(
-        isLocalOllama(url)
-          ? `Ollama doesn't have "${model}" yet. Pull it first: ollama pull ${model}`
-          : `Ollama Cloud doesn't host "${model}" - it only serves a small catalogue of large models, and most local vision models (qwen3-vl, llama3.2-vision) aren't in it. Open settings and pick from the discovered list; gemma4:31b is the lightest cloud vision option.`
+        `Ollama Cloud doesn't host "${model}". It serves a small catalogue of large models — qwen3-vl and llama3.2-vision are local-only and not available here. Open settings and pick from the discovered list; gemma4:31b is the lightest cloud vision option.`
       );
     }
 
@@ -449,7 +432,6 @@ export async function analyzeDogImage(file: File | Blob, config: ApiKeys, includ
   if (provider === "ollama") {
     return analyzeWithOllama(
       file,
-      config.ollamaUrl ?? "",
       config.ollamaModel || "gemma4:31b",
       config.ollamaKey ?? "",
       includeWriting
@@ -462,9 +444,7 @@ export async function analyzeDogImage(file: File | Blob, config: ApiKeys, includ
 /** Whether the current settings are complete enough to attempt an analysis. */
 export function hasVisionConfig(config: ApiKeys): boolean {
   if (config.aiProvider === "ollama") {
-    if (!config.ollamaModel) return false;
-    // Cloud needs a key; a local instance does not.
-    return isLocalOllama(config.ollamaUrl ?? "") || !!config.ollamaKey;
+    return !!config.ollamaModel && !!config.ollamaKey;
   }
   return !!config.geminiKey;
 }

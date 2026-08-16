@@ -36,7 +36,7 @@ import type {
 } from "../types";
 import { evaluateRig, buildRigTables, type RigTables } from "./rig";
 import { drawCaptions } from "./captions";
-import { buildBackgroundPlate } from "./backgroundPlate";
+import { buildBackgroundPlate, isDrawable } from "./backgroundPlate";
 import { jawHingeY } from "../services/segmentation";
 
 /* ------------------------------------------------------------------ *
@@ -548,7 +548,12 @@ export class FrameRenderer {
         this.texPlate,
         buildBackgroundPlate(layers.source, layers.cutout, {
           blurPx: background.blurPx,
-          blur: background.id === "blur",
+          // Selecting "your own" before uploading anything leaves nothing to
+          // draw, so fall back to the blurred photo until an image exists —
+          // the tile then previews as something rather than as a black frame.
+          blur:
+            background.id === "blur" ||
+            (background.id === "custom" && !isDrawable(background.customImage)),
           customImage: background.id === "custom" ? background.customImage : null,
         })
       );

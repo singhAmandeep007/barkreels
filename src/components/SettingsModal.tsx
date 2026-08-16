@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { X, Key, Cloud, HardDrive, ExternalLink, ShieldCheck, RefreshCw, Eye, AlertTriangle } from "lucide-react";
+import { X, Cloud, ExternalLink, ShieldCheck, RefreshCw, Eye, AlertTriangle } from "lucide-react";
 import type { AiProvider, ApiKeys } from "../types";
-import { isLocalOllama, listOllamaModels, partitionVisionModels } from "../services/vision";
+import { listOllamaModels, partitionVisionModels } from "../services/vision";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -31,18 +31,18 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
     setModelsLoading(true);
     setModelsError(null);
     try {
-      setModels(await listOllamaModels(draft.ollamaUrl ?? "", draft.ollamaKey ?? ""));
+      setModels(await listOllamaModels(draft.ollamaKey ?? ""));
     } catch (err) {
       setModels([]);
       setModelsError(err instanceof Error ? err.message : "Could not reach the server.");
     } finally {
       setModelsLoading(false);
     }
-  }, [draft.ollamaUrl, draft.ollamaKey]);
+  }, [draft.ollamaKey]);
 
   /**
-   * Refetch whenever the endpoint changes, debounced - the URL field fires on
-   * every keystroke and "http://localhost:1" is not worth a request.
+   * Refetch when the panel opens or the key changes, debounced — the key field
+   * fires on every keystroke and a half-typed key is not worth a request.
    */
   useEffect(() => {
     if (!isOpen || draft.aiProvider !== "ollama") return;
@@ -53,7 +53,6 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
   if (!isOpen) return null;
 
   const provider: AiProvider = draft.aiProvider ?? "gemini";
-  const usingLocalOllama = isLocalOllama(draft.ollamaUrl ?? "");
 
   const set = <K extends keyof ApiKeys>(key: K, value: ApiKeys[K]) => setDraft((prev) => ({ ...prev, [key]: value }));
 
@@ -72,13 +71,8 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
       <div className="relative w-full max-w-lg max-h-[88vh] overflow-y-auto glass-card rounded-3xl p-6 space-y-6 border border-white/10 shadow-2xl">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-xl font-black text-white flex items-center gap-2">
-              <Key className="h-5 w-5 text-amber-500" />
-              API keys
-            </h2>
-            <p className="text-xs text-gray-500 mt-1">
-              Stored in your browser's local storage. Nothing is sent to any server of ours - there isn't one.
-            </p>
+            <h2 className="text-xl font-black text-white flex items-center gap-2">API keys</h2>
+            <p className="text-xs text-gray-500 mt-1">Stored in your browser's local storage.</p>
           </div>
           <button
             onClick={onClose}
@@ -109,10 +103,6 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
             placeholder="sk_…"
             className="w-full rounded-xl p-3 text-sm text-white glass-input focus:outline-none focus:ring-1 focus:ring-amber-500/50"
           />
-          <p className="text-[11px] text-gray-600">
-            Used for the voiceover and its word-level timestamps, which drive both the subtitles and the mouth
-            animation.
-          </p>
         </div>
 
         <div className="border-t border-white/5 pt-5 space-y-4">
@@ -135,7 +125,7 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
                     {id === "gemini" ? "Google Gemini" : "Ollama"}
                   </span>
                   <span className="block text-[10px] text-gray-500 mt-0.5">
-                    {id === "gemini" ? "Cloud, no setup" : "Cloud or your own machine"}
+                    {id === "gemini" ? "Cloud" : "Ollama Cloud"}
                   </span>
                 </button>
               );
@@ -186,48 +176,24 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
             </div>
           ) : (
             <div className="space-y-3">
-              <label className="text-xs font-bold text-gray-400 block">Server URL</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-gray-400">Ollama API key</label>
+                <a
+                  href="https://ollama.com/settings/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-amber-500 hover:text-amber-400 flex items-center gap-1"
+                >
+                  Get one <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
               <input
-                type="text"
-                value={draft.ollamaUrl}
-                onChange={(e) => set("ollamaUrl", e.target.value)}
-                placeholder="Leave blank for Ollama Cloud, or http://localhost:11434"
+                type="password"
+                value={draft.ollamaKey}
+                onChange={(e) => set("ollamaKey", e.target.value)}
+                placeholder="Required for Ollama Cloud"
                 className="w-full rounded-xl p-3 text-sm text-white glass-input focus:outline-none focus:ring-1 focus:ring-amber-500/50"
               />
-
-              <div className="flex items-start gap-2 text-[11px] leading-relaxed rounded-xl p-3 bg-gray-950/60 border border-white/5">
-                {usingLocalOllama ? (
-                  <>
-                    <HardDrive className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
-                    <span className="text-gray-400">
-                      Local instance - nothing leaves your machine. Start Ollama with{" "}
-                      <code className="text-amber-500">OLLAMA_ORIGINS="*"</code> so the browser is allowed to call it.
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <Cloud className="h-4 w-4 text-sky-500 shrink-0 mt-0.5" />
-                    <span className="text-gray-400">
-                      Ollama Cloud. Requests go through a same-origin{" "}
-                      <code className="text-amber-500">/ollama-api</code> rewrite, because Ollama Cloud sends no CORS
-                      headers and the browser would otherwise refuse the call.
-                    </span>
-                  </>
-                )}
-              </div>
-
-              {!usingLocalOllama && (
-                <>
-                  <label className="text-xs font-bold text-gray-400 block">Ollama API key</label>
-                  <input
-                    type="password"
-                    value={draft.ollamaKey}
-                    onChange={(e) => set("ollamaKey", e.target.value)}
-                    placeholder="Required for Ollama Cloud"
-                    className="w-full rounded-xl p-3 text-sm text-white glass-input focus:outline-none focus:ring-1 focus:ring-amber-500/50"
-                  />
-                </>
-              )}
 
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-gray-400">Vision model</label>
@@ -246,7 +212,6 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
                 loading={modelsLoading}
                 error={modelsError}
                 value={draft.ollamaModel}
-                isLocal={usingLocalOllama}
                 onChange={(m) => set("ollamaModel", m)}
               />
             </div>
@@ -283,14 +248,12 @@ function ModelPicker({
   loading,
   error,
   value,
-  isLocal,
   onChange,
 }: {
   models: string[];
   loading: boolean;
   error: string | null;
   value: string;
-  isLocal: boolean;
   onChange: (model: string) => void;
 }) {
   // Text-only models are filtered out entirely rather than shown greyed: the
@@ -311,10 +274,7 @@ function ModelPicker({
       <div className="space-y-2">
         <div className="flex items-start gap-2 rounded-xl p-3 bg-rose-500/5 border border-rose-500/20 text-[11px] text-rose-400 leading-relaxed">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-          <span>
-            {error}
-            {isLocal && ' Is Ollama running, and started with OLLAMA_ORIGINS="*"?'}
-          </span>
+          <span>{error}</span>
         </div>
         {/* Still allow a manual name - discovery failing shouldn't lock them out. */}
         <input
@@ -331,9 +291,7 @@ function ModelPicker({
   if (vision.length === 0) {
     return (
       <div className="rounded-xl p-3 bg-gray-950/60 border border-white/5 text-[11px] text-gray-500">
-        {isLocal
-          ? "No vision models pulled yet. Try: ollama pull gemma4:12b"
-          : "This server reports no vision-capable models."}
+        {"Ollama Cloud reported no vision-capable models."}
       </div>
     );
   }
@@ -368,14 +326,12 @@ function ModelPicker({
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             <strong>{value}</strong> isn't available here
-            {isLocal ? " - pull it, or pick one below." : " - pick one below."}
+            {" - pick one below."}
           </span>
         </div>
       )}
 
-      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-        {vision.map((m) => row(m))}
-      </div>
+      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">{vision.map((m) => row(m))}</div>
     </div>
   );
 }
