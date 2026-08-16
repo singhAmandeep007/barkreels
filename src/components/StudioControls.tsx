@@ -16,14 +16,22 @@ interface StudioControlsProps {
   onRigChange: (config: RigConfig) => void;
   captions: CaptionConfig;
   onCaptionsChange: (config: CaptionConfig) => void;
+  /** False when the audio has no word timings (a user recording). */
+  captionsAvailable: boolean;
   background: BackgroundConfig;
   onBackgroundChange: (config: BackgroundConfig) => void;
   exportConfig: ExportConfig;
   onExportChange: (config: ExportConfig) => void;
 }
 
+/**
+ * Ordered least to most motion. `still` leads because it is the most
+ * convincing for a portrait — the frame holds and only the face moves.
+ */
 const PRESET_META: { id: PresetId; label: string; emoji: string; desc: string }[] = [
-  { id: "idle", label: "Portrait", emoji: "🎙️", desc: "Subtle, talks to camera" },
+  { id: "still", label: "Locked Off", emoji: "🗿", desc: "Only face moves" },
+  { id: "subtle", label: "Barely There", emoji: "🍃", desc: "Whisper of drift" },
+  { id: "idle", label: "Portrait", emoji: "🎙️", desc: "Gentle sway" },
   { id: "roll", label: "Belly Roll", emoji: "🙃", desc: "Lazy sideways flop" },
   { id: "bounce", label: "Bouncy", emoji: "🏀", desc: "Springy on the beat" },
   { id: "zoomies", label: "Zoomies", emoji: "💨", desc: "Maximum chaos" },
@@ -106,6 +114,7 @@ export function StudioControls({
   onRigChange,
   captions,
   onCaptionsChange,
+  captionsAvailable,
   background,
   onBackgroundChange,
   exportConfig,
@@ -211,6 +220,14 @@ export function StudioControls({
           format={(v) => `every ${v.toFixed(1)}s`}
           onChange={(v) => onRigChange({ ...rigConfig, blinkIntervalSec: v })}
         />
+        <Slider
+          label="Ear twitch"
+          value={rigConfig.earTwitchAmp}
+          min={0}
+          max={0.5}
+          step={0.01}
+          onChange={(v) => onRigChange({ ...rigConfig, earTwitchAmp: v })}
+        />
       </Section>
 
       <Section
@@ -274,17 +291,28 @@ export function StudioControls({
         icon={<Captions className="h-4 w-4 text-amber-500" />}
         title="Subtitles"
       >
-        <label className="flex items-center justify-between cursor-pointer">
-          <span className="text-xs font-bold text-gray-300">Burn in subtitles</span>
-          <input
-            type="checkbox"
-            checked={captions.enabled}
-            onChange={(e) => onCaptionsChange({ ...captions, enabled: e.target.checked })}
-            className="h-4 w-4 accent-amber-500 cursor-pointer"
-          />
-        </label>
+        {!captionsAvailable ? (
+          // Explain rather than silently disable: an unexplained dead toggle
+          // reads as a bug, and this one has a real reason behind it.
+          <p className="text-[11px] text-gray-500 leading-relaxed">
+            Subtitles need per-word timings, which come from text-to-speech. Your own
+            recording doesn't carry them, so subtitles are unavailable for this clip.
+            Choose <strong className="text-gray-400">AI writes it</strong> or{" "}
+            <strong className="text-gray-400">I'll write it</strong> to get them back.
+          </p>
+        ) : (
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-xs font-bold text-gray-300">Burn in subtitles</span>
+            <input
+              type="checkbox"
+              checked={captions.enabled}
+              onChange={(e) => onCaptionsChange({ ...captions, enabled: e.target.checked })}
+              className="h-4 w-4 accent-amber-500 cursor-pointer"
+            />
+          </label>
+        )}
 
-        {captions.enabled && (
+        {captionsAvailable && captions.enabled && (
           <>
             <div className="grid grid-cols-3 gap-2">
               {CAPTION_STYLES.map((style) => {

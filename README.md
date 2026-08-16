@@ -58,6 +58,7 @@ expensive model. Everything below is in `src/render/rig.ts`.
 | **Head sway**    | `A·(sin(2π·0.37t) + 0.5·sin(2π·0.61t + 1.1))`                   | Two **incommensurable** frequencies. A single sine has a period the eye locks onto within three cycles; an irrational ratio never repeats inside a clip.  |
 | **Emphasis nod** | `nod'' = −k·nod − c·nod'`, kicked by onset impulses, `ζ = 0.55` | Underdamped so the head overshoots exactly once and settles - a real neck absorbing an impulse. `ζ = 1` looks sedated; `ζ > 0.7` looks like a bobblehead. |
 | **Blink**        | Poisson `λ = 1/3.5s`, close 60ms / open 140ms                   | Asymmetric. Uniform-interval blinking is one of the strongest "this is a puppet" tells.                                                                   |
+| **Ears**         | Poisson flicks, `sin(2.5πp)·e^(−4.2p)`, hinged at the skull      | Rotated about the ear base with a lever weight, not translated — a translated ear drags scalp along with it. Seeded separately per side so they never fire together. |
 | **Camera**       | eased Ken Burns + 2 octaves of value noise                      | Band-limited noise reads as a handheld operator; white noise reads as compression artefacts.                                                              |
 | **Parallax**     | `bg = −0.35 · subject displacement`                             | Counter-motion is the cheapest convincing depth cue there is.                                                                                             |
 
@@ -70,8 +71,17 @@ Two details worth stealing:
    derivative spikes on every syllable edge; feeding it in directly gives you
    either nothing or a permanent jitter.
 
-Presets (`Portrait`, `Belly Roll`, `Bouncy`, `Zoomies`) are just different
-points in the same coefficient space, not separate code paths.
+Presets are just different points in the same coefficient space, not separate
+code paths — ordered least to most motion:
+
+`Locked Off` · `Barely There` · `Portrait` · `Belly Roll` · `Bouncy` · `Zoomies`
+
+**`Locked Off` is the default, and it's the most convincing.** The frame, the
+camera and the body hold completely still; only the mouth, eyes and ears move.
+That's counterintuitive until you notice that *motion* is what gives away a
+puppeted photo. Hold everything still and the viewer reads it as real video of a
+dog sitting calmly, leaving only the mouth to judge — and the mouth is the one
+part driven by real audio.
 
 ---
 
@@ -87,10 +97,39 @@ The jaw warp is gated to the _lower_ half of the muzzle box, because only the
 mandible moves. Without that gate the whole snout inflates and reads as a
 balloon.
 
-Anchors (muzzle, eyes, chest) come from the vision model as normalised boxes.
+Anchors (muzzle, eyes, ears, chest) come from the vision model as normalised
+boxes.
 When it declines to cooperate, `deriveAnchors` synthesises estimates from the
 alpha mask's bounding box using canine facial proportions - crude, but it
 degrades to a head bob rather than a glitch.
+
+---
+
+## Avoiding silhouette ghosting
+
+Two independent bugs both produce a displaced copy of the dog, and fixing one
+still leaves the other visible:
+
+1. **A fake contact shadow.** Sampling the cutout's alpha at an offset and
+   darkening the background with it is, by construction, an offset copy of the
+   whole silhouette. Removed — real contact shadows pool on the ground, and most
+   inputs here are head-and-shoulders portraits with no ground in frame.
+
+2. **The background plate still contained the dog.** The blurred background was
+   a blur of the *whole photo*. The moment the cutout parallaxed away from its
+   starting position it uncovered its own blurred twin. This one gets worse the
+   more depth you add, so it punishes exactly the feature it's attached to.
+
+The fix for (2) is `render/backgroundPlate.ts`: erase the dog, dilate the hole a
+few pixels to throw away the mask's feathered fringe, then fill it by
+**pull-push** — halve the image repeatedly (canvas premultiplies alpha, so a
+bilinear downscale *is* an alpha-weighted average and holes bleed inward for
+free), then composite the coarse levels back underneath the fine ones with
+`destination-over`.
+
+It's a scattered-data approximation, and it works here precisely because the
+plate gets heavily blurred afterwards: we need plausible low-frequency colour,
+not plausible detail.
 
 ---
 

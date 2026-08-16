@@ -293,7 +293,10 @@ function ModelPicker({
   isLocal: boolean;
   onChange: (model: string) => void;
 }) {
-  const { vision, other } = partitionVisionModels(models);
+  // Text-only models are filtered out entirely rather than shown greyed: the
+  // list is long, and a model that cannot see the photo is never a valid
+  // choice here, so listing it is pure noise.
+  const { vision } = partitionVisionModels(models);
 
   if (loading && models.length === 0) {
     return (
@@ -325,15 +328,17 @@ function ModelPicker({
     );
   }
 
-  if (models.length === 0) {
+  if (vision.length === 0) {
     return (
       <div className="rounded-xl p-3 bg-gray-950/60 border border-white/5 text-[11px] text-gray-500">
-        {isLocal ? "No models pulled yet. Try: ollama pull gemma4:12b" : "No models reported."}
+        {isLocal
+          ? "No vision models pulled yet. Try: ollama pull gemma4:12b"
+          : "This server reports no vision-capable models."}
       </div>
     );
   }
 
-  const row = (name: string, canSee: boolean) => {
+  const row = (name: string) => {
     const active = value === name;
     return (
       <button
@@ -344,21 +349,17 @@ function ModelPicker({
         }`}
       >
         <span className="text-[11px] font-bold text-white truncate">{name}</span>
-        {canSee ? (
-          <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-500 shrink-0">
-            <Eye className="h-3 w-3" />
-            VISION
-          </span>
-        ) : (
-          <span className="text-[9px] font-bold text-gray-600 shrink-0">TEXT ONLY</span>
-        )}
+        <span className="flex items-center gap-1 text-[9px] font-bold text-emerald-500 shrink-0">
+          <Eye className="h-3 w-3" />
+          VISION
+        </span>
       </button>
     );
   };
 
   // A stored model that the server doesn't offer selects nothing, which just
   // looks like a rendering bug. Say what's wrong instead.
-  const missing = value && !models.includes(value);
+  const missing = value && !vision.includes(value);
 
   return (
     <div className="space-y-1.5">
@@ -373,16 +374,7 @@ function ModelPicker({
       )}
 
       <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-        {vision.map((m) => row(m, true))}
-
-        {other.length > 0 && (
-          <>
-            <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wide pt-2">
-              No vision - can't see the photo
-            </p>
-            {other.map((m) => row(m, false))}
-          </>
-        )}
+        {vision.map((m) => row(m))}
       </div>
     </div>
   );

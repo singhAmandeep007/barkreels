@@ -82,6 +82,8 @@ function parseAnchors(raw: Record<string, unknown> | undefined): DogAnchors | nu
     mouth,
     leftEye: boxFrom1000(raw.left_eye),
     rightEye: boxFrom1000(raw.right_eye),
+    leftEar: boxFrom1000(raw.left_ear),
+    rightEar: boxFrom1000(raw.right_ear),
     chest,
   };
 }
@@ -107,31 +109,56 @@ function coerceAnalysis(parsed: Record<string, unknown>): DogAnalysis {
   };
 }
 
-const PROMPT = `You are a hilarious dog whisperer AND a precise vision annotator.
+/**
+ * Build the prompt for the fields we actually need.
+ *
+ * `monologue` and `suggestedVoice` are only requested when the user has asked
+ * the model to write for them. When they're supplying their own script or
+ * recording, asking anyway wastes tokens and — worse — invites the model to
+ * spend its attention on comedy instead of on the anchor coordinates, which
+ * are the part the animation genuinely can't work without.
+ */
+export function buildPrompt(includeWriting: boolean): string {
+  const writingJob = includeWriting
+    ? `
+JOB 1 - Character: invent a funny, relatable inner monologue (2-4 sentences, under 320 characters) that would go viral as a Reel. Make it specific to what you actually see in THIS photo, not generic dog humour.
+`
+    : '';
 
-Look at this dog photo and do two jobs.
+  const writingFields = includeWriting
+    ? `
+  "monologue": "the funny inner monologue",
+  "suggestedVoice": "one of: deep, playful, dramatic, sassy",`
+    : '';
 
-JOB 1 - Character: invent a funny, relatable inner monologue (2-4 sentences, under 320 characters) that would go viral as a TikTok or Reel. Make it specific to what you actually see in THIS photo, not generic dog humour.
+  return `You are a precise dog-photo annotator${includeWriting ? ' AND a hilarious dog whisperer' : ''}.
+${writingJob}
+${includeWriting ? 'JOB 2 - ' : ''}Annotation: locate the dog's features. Report every box as [ymin, xmin, ymax, xmax] normalised to 0-1000.
 
-JOB 2 - Annotation: locate the dog's features. Report every box as [ymin, xmin, ymax, xmax] normalised to 0-1000. Be precise: the "mouth" box must tightly enclose the muzzle and jaw only, because it drives mouth animation. "chest" is a single [y, x] point at the centre of the dog's chest.
+Be precise, because these coordinates drive the animation directly:
+- "mouth" must tightly enclose the muzzle and lower jaw ONLY. Do not include the eyes or forehead.
+- "left_ear" and "right_ear" cover each ear from its base on the skull to its tip. Left and right are from the VIEWER's perspective. If an ear is hidden or cropped out, use null.
+- "chest" is a single [y, x] point at the centre of the dog's chest.
+- If the photo is a profile view and a feature is not visible, use null rather than guessing.
 
 Return ONLY this JSON, no markdown:
 {
   "breed": "best guess",
   "mood": "two or three words",
-  "personality": "two or three words",
-  "monologue": "the funny inner monologue",
-  "suggestedVoice": "one of: deep, playful, dramatic, sassy",
+  "personality": "two or three words",${writingFields}
   "hashtags": ["three to five tags without the # symbol"],
   "energy": 0.0 to 1.0 (0 = asleep, 1 = full zoomies),
   "anchors": {
     "head": [ymin, xmin, ymax, xmax],
     "mouth": [ymin, xmin, ymax, xmax],
-    "left_eye": [ymin, xmin, ymax, xmax],
-    "right_eye": [ymin, xmin, ymax, xmax],
+    "left_eye": [ymin, xmin, ymax, xmax] or null,
+    "right_eye": [ymin, xmin, ymax, xmax] or null,
+    "left_ear": [ymin, xmin, ymax, xmax] or null,
+    "right_ear": [ymin, xmin, ymax, xmax] or null,
     "chest": [y, x]
   }
 }`;
+}
 
 /* ------------------------------------------------------------------ *
  * Gemini
@@ -148,7 +175,12 @@ Return ONLY this JSON, no markdown:
  */
 const GEMINI_FALLBACKS = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-2.5-flash"];
 
-async function analyzeWithGemini(file: File | Blob, apiKey: string, preferredModel: string): Promise<DogAnalysis> {
+async function analyzeWithGemini(
+  file: File | Blob,
+  apiKey: string,
+  preferredModel: string,
+  includeWriting: boolean
+): Promise<DogAnalysis> {
   if (!apiKey) throw new Error("Gemini API key is required.");
 
   const base64 = await fileToBase64(file);
@@ -171,7 +203,7 @@ async function analyzeWithGemini(file: File | Blob, apiKey: string, preferredMod
         body: JSON.stringify({
           contents: [
             {
-              parts: [{ text: PROMPT }, { inline_data: { mime_type: mimeType, data: base64 } }],
+              parts: [{ text: buildPrompt(includeWriting) }, { inline_data: { mime_type: mimeType, data: base64 } }],
             },
           ],
           generationConfig: {
@@ -201,7 +233,9 @@ async function analyzeWithGemini(file: File | Blob, apiKey: string, preferredMod
 
       const parsed = JSON.parse(extractJSON(text));
       const analysis = coerceAnalysis(parsed);
-      if (!analysis.monologue) throw new Error("Gemini returned no monologue.");
+      if (includeWriting && !analysis.monologue) {
+        throw new Error("Gemini returned no monologue.");
+      }
       return analysis;
     } catch (err) {
       if (err instanceof Error && /not found|not supported|404/i.test(err.message)) {
@@ -292,7 +326,13 @@ export function partitionVisionModels(models: string[]): {
   return { vision, other };
 }
 
-async function analyzeWithOllama(file: File | Blob, url: string, model: string, apiKey: string): Promise<DogAnalysis> {
+async function analyzeWithOllama(
+  file: File | Blob,
+  url: string,
+  model: string,
+  apiKey: string,
+  includeWriting: boolean
+): Promise<DogAnalysis> {
   const base64 = await fileToBase64(file);
   const endpoint = resolveOllamaEndpoint(url);
 
@@ -306,7 +346,7 @@ async function analyzeWithOllama(file: File | Blob, url: string, model: string, 
       headers,
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: PROMPT, images: [base64] }],
+        messages: [{ role: "user", content: buildPrompt(includeWriting), images: [base64] }],
         stream: false,
         options: { temperature: 0.9 },
         // Ollama's structured-output mode: a JSON schema constrains decoding,
@@ -317,8 +357,12 @@ async function analyzeWithOllama(file: File | Blob, url: string, model: string, 
             breed: { type: "string" },
             mood: { type: "string" },
             personality: { type: "string" },
-            monologue: { type: "string" },
-            suggestedVoice: { type: "string", enum: [...VOICES] },
+            ...(includeWriting
+              ? {
+                  monologue: { type: "string" },
+                  suggestedVoice: { type: "string", enum: [...VOICES] },
+                }
+              : {}),
             hashtags: { type: "array", items: { type: "string" } },
             energy: { type: "number" },
             anchors: {
@@ -328,12 +372,16 @@ async function analyzeWithOllama(file: File | Blob, url: string, model: string, 
                 mouth: { type: "array", items: { type: "number" } },
                 left_eye: { type: "array", items: { type: "number" } },
                 right_eye: { type: "array", items: { type: "number" } },
+                left_ear: { type: "array", items: { type: "number" } },
+                right_ear: { type: "array", items: { type: "number" } },
                 chest: { type: "array", items: { type: "number" } },
               },
               required: ["head", "mouth"],
             },
           },
-          required: ["breed", "mood", "personality", "monologue", "suggestedVoice"],
+          required: includeWriting
+            ? ["breed", "mood", "personality", "monologue", "suggestedVoice", "anchors"]
+            : ["breed", "mood", "personality", "anchors"],
         },
       }),
     });
@@ -376,7 +424,9 @@ async function analyzeWithOllama(file: File | Blob, url: string, model: string, 
   if (!text) throw new Error("Ollama returned an empty response.");
 
   const analysis = coerceAnalysis(JSON.parse(extractJSON(text)));
-  if (!analysis.monologue) throw new Error("Ollama returned no monologue.");
+  if (includeWriting && !analysis.monologue) {
+    throw new Error("Ollama returned no monologue.");
+  }
   return analysis;
 }
 
@@ -384,14 +434,33 @@ async function analyzeWithOllama(file: File | Blob, url: string, model: string, 
  * Public entry point
  * ------------------------------------------------------------------ */
 
-export async function analyzeDogImage(file: File | Blob, config: ApiKeys): Promise<DogAnalysis> {
+/**
+ * @param includeWriting  Ask the model to also write a monologue and pick a
+ *   voice. False when the user is supplying their own script or recording.
+ */
+export async function analyzeDogImage(
+  file: File | Blob,
+  config: ApiKeys,
+  includeWriting = true
+): Promise<DogAnalysis> {
   const provider: AiProvider = config.aiProvider ?? "gemini";
 
   if (provider === "ollama") {
-    return analyzeWithOllama(file, config.ollamaUrl ?? "", config.ollamaModel || "qwen3-vl:8b", config.ollamaKey ?? "");
+    return analyzeWithOllama(
+      file,
+      config.ollamaUrl ?? "",
+      config.ollamaModel || "gemma4:31b",
+      config.ollamaKey ?? "",
+      includeWriting
+    );
   }
 
-  return analyzeWithGemini(file, config.geminiKey, config.geminiModel || "gemini-flash-latest");
+  return analyzeWithGemini(
+    file,
+    config.geminiKey,
+    config.geminiModel || "gemini-flash-latest",
+    includeWriting
+  );
 }
 
 /** Whether the current settings are complete enough to attempt an analysis. */

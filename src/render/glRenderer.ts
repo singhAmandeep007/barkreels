@@ -36,6 +36,7 @@ import type {
 } from "../types";
 import { evaluateRig, buildRigTables, type RigTables } from "./rig";
 import { drawCaptions } from "./captions";
+import { buildBackgroundPlate } from "./backgroundPlate";
 
 /* ------------------------------------------------------------------ *
  * Shaders
@@ -56,9 +57,9 @@ precision highp float;
 in vec2 v_uv;
 out vec4 outColor;
 
-uniform sampler2D u_source;   // full photo (background duty)
+uniform sampler2D u_source;   // untouched photo (used when there is no cutout)
 uniform sampler2D u_cutout;   // dog with alpha
-uniform sampler2D u_blurred;  // pre-blurred photo
+uniform sampler2D u_plate;    // background with the dog erased and inpainted
 
 uniform float u_hasCutout;
 uniform float u_aspect;       // canvasWidth / canvasHeight
@@ -84,7 +85,11 @@ uniform vec2  u_bgShift;
 uniform vec4 u_mouthBox;   // x, y, w, h
 uniform vec4 u_leftEye;
 uniform vec4 u_rightEye;
+uniform vec4 u_leftEar;
+uniform vec4 u_rightEar;
 uniform vec2 u_chest;
+uniform float u_earL;
+uniform float u_earR;
 
 // Background
 uniform int   u_bgMode;    // 0 original, 1 blur, 2 sunset, 3 studio, 4 park, 5 neon, 6 solid
@@ -138,6 +143,37 @@ vec2 applyJaw(vec2 uv, float amount) {
   float gate = smoothstep(-0.25, 0.55, d.y);
 
   uv.y -= amount * u_mouthBox.w * falloff * gate;
+  return uv;
+}
+
+/* Ear twitch.
+   Lift and rotate the ear about its base rather than translating the whole
+   box: ears are hinged at the skull, so a pure translation detaches them from
+   the head and slides a chunk of scalp along with them. Weighting the rotation
+   by height within the box means the base barely moves while the tip swings,
+   which is how a real ear flicks. */
+vec2 applyEar(vec2 uv, vec4 box, float amount, float dir) {
+  if (amount <= 0.0001 || box.z <= 0.0) return uv;
+
+  vec2 base = vec2(box.x + box.z * 0.5, box.y + box.w);  // hinge at the bottom
+  vec2 radius = box.zw * 1.2;
+  vec2 d = (uv - base) / max(radius, vec2(0.0001));
+
+  float reach = length(vec2(d.x, d.y * 0.6));
+  if (reach > 1.4) return uv;
+
+  float falloff = 1.0 - smoothstep(0.0, 1.4, reach);
+  // Vertical weight: 0 at the hinge, 1 at the tip.
+  float lever = clamp((base.y - uv.y) / max(box.w, 0.0001), 0.0, 1.0);
+
+  float angle = -amount * dir * 0.42 * falloff * lever;
+  vec2 p = toSquare(uv - base);
+  p = rotate(p, angle);
+  uv = fromSquare(p) + base;
+
+  // A little lift on top of the rotation, so the ear perks rather than only
+  // swinging sideways.
+  uv.y += amount * box.w * 0.16 * falloff * lever;
   return uv;
 }
 
@@ -222,12 +258,12 @@ void main() {
   vec2 bgUV = (p - u_bgShift) * u_texScale + u_texOffset;
   vec3 bg;
 
-  if (u_bgMode == 0) {
-    bg = texture(u_source, clamp(bgUV, 0.0, 1.0)).rgb;
-  } else if (u_bgMode == 1) {
-    bg = texture(u_blurred, clamp(bgUV, 0.0, 1.0)).rgb;
-    // Darken slightly so the subject separates from its own blurred copy.
-    bg *= 0.82;
+  if (u_bgMode == 0 || u_bgMode == 1) {
+    // Both the sharp and blurred backgrounds read from the inpainted plate,
+    // never the raw photo — the raw photo still contains the dog, and the
+    // moment the cutout parallaxes away it would uncover its own twin.
+    bg = texture(u_plate, clamp(bgUV, 0.0, 1.0)).rgb;
+    if (u_bgMode == 1) bg *= 0.86;
   } else {
     bg = backgroundColor(v_uv - u_bgShift * 0.5);
   }
@@ -260,6 +296,8 @@ void main() {
   bodyUV = applyJaw(bodyUV, u_jaw);
   bodyUV = applyEye(bodyUV, u_leftEye, u_blink);
   bodyUV = applyEye(bodyUV, u_rightEye, u_blink);
+  bodyUV = applyEar(bodyUV, u_leftEar, u_earL, -1.0);
+  bodyUV = applyEar(bodyUV, u_rightEar, u_earR, 1.0);
 
   /* --- Composite -------------------------------------------------- */
   vec4 dog = texture(u_cutout, clamp(bodyUV, 0.0, 1.0));
@@ -270,11 +308,12 @@ void main() {
     dog.a = 0.0;
   }
 
-  // Contact shadow: a soft dark pool under the subject, offset opposite the
-  // hop. Costs almost nothing and does most of the work of making the dog sit
-  // in the scene rather than float in front of it.
-  float shadow = texture(u_cutout, clamp(bodyUV + vec2(0.012, -0.028), 0.0, 1.0)).a;
-  bg = mix(bg, bg * 0.55, shadow * 0.45);
+  // NOTE: there used to be a "contact shadow" here that sampled the cutout's
+  // alpha at an offset and darkened the background with it. That is by
+  // construction a displaced copy of the whole silhouette — a ghost, not a
+  // shadow. Real contact shadows pool on the ground; most of our inputs are
+  // head-and-shoulders portraits with no visible ground at all, so the honest
+  // answer is to draw nothing and let the inpainted plate carry the scene.
 
   vec3 composited = mix(bg, dog.rgb, dog.a);
 
@@ -342,30 +381,6 @@ function hexToRgb(hex: string): [number, number, number] {
   return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
 }
 
-/**
- * Pre-blur the photo once into a texture-ready canvas.
- *
- * A separable Gaussian in GLSL would need two extra passes and a framebuffer
- * each; the 2D context's `filter` property hands us a hardware-accelerated
- * blur for three lines, and since the background blur never changes during
- * playback there's no reason to recompute it per frame.
- */
-function makeBlurred(source: ImageBitmap, blurPx: number): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = source.width;
-  canvas.height = source.height;
-  const ctx = canvas.getContext("2d");
-  if (ctx) {
-    // Scale the radius to the image so a 4000px photo doesn't get a blur that
-    // reads as barely-there next to the same setting on a 600px one.
-    const scaled = (blurPx * source.width) / 1080;
-    ctx.filter = `blur(${Math.max(1, scaled)}px)`;
-    ctx.drawImage(source, 0, 0);
-    ctx.filter = "none";
-  }
-  return canvas;
-}
-
 /* ------------------------------------------------------------------ *
  * Renderer
  * ------------------------------------------------------------------ */
@@ -391,7 +406,7 @@ export class FrameRenderer {
 
   private texSource: WebGLTexture;
   private texCutout: WebGLTexture;
-  private texBlurred: WebGLTexture;
+  private texPlate: WebGLTexture;
 
   private tables: RigTables;
   private inputs: RendererInputs;
@@ -443,7 +458,11 @@ export class FrameRenderer {
     for (const name of [
       "u_source",
       "u_cutout",
-      "u_blurred",
+      "u_plate",
+      "u_leftEar",
+      "u_rightEar",
+      "u_earL",
+      "u_earR",
       "u_hasCutout",
       "u_aspect",
       "u_time",
@@ -472,7 +491,7 @@ export class FrameRenderer {
 
     this.texSource = createTexture(gl);
     this.texCutout = createTexture(gl);
-    this.texBlurred = createTexture(gl);
+    this.texPlate = createTexture(gl);
 
     this.tables = buildRigTables(inputs.rigConfig, inputs.envelope, inputs.durationSec);
 
@@ -492,10 +511,19 @@ export class FrameRenderer {
       uploadBlank(gl, this.texCutout);
     }
 
-    if (background.id === "blur") {
-      upload(gl, this.texBlurred, makeBlurred(layers.source, background.blurPx));
+    // Only the photo-derived backgrounds need a plate; the procedural ones
+    // never sample it, and inpainting is the most expensive setup step here.
+    if (background.id === "blur" || background.id === "original") {
+      upload(
+        gl,
+        this.texPlate,
+        buildBackgroundPlate(layers.source, layers.cutout, {
+          blurPx: background.blurPx,
+          blur: background.id === "blur",
+        })
+      );
     } else {
-      uploadBlank(gl, this.texBlurred);
+      uploadBlank(gl, this.texPlate);
     }
   }
 
@@ -561,8 +589,8 @@ export class FrameRenderer {
     gl.uniform1i(u.u_cutout, 1);
 
     gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.texBlurred);
-    gl.uniform1i(u.u_blurred, 2);
+    gl.bindTexture(gl.TEXTURE_2D, this.texPlate);
+    gl.uniform1i(u.u_plate, 2);
 
     gl.uniform1f(u.u_hasCutout, layers.cutout ? 1 : 0);
     gl.uniform1f(u.u_aspect, width / height);
@@ -588,6 +616,14 @@ export class FrameRenderer {
     const re = anchors.rightEye;
     gl.uniform4f(u.u_leftEye, le?.x ?? 0, le?.y ?? 0, le?.w ?? 0, le?.h ?? 0);
     gl.uniform4f(u.u_rightEye, re?.x ?? 0, re?.y ?? 0, re?.w ?? 0, re?.h ?? 0);
+
+    const lear = anchors.leftEar;
+    const rear = anchors.rightEar;
+    gl.uniform4f(u.u_leftEar, lear?.x ?? 0, lear?.y ?? 0, lear?.w ?? 0, lear?.h ?? 0);
+    gl.uniform4f(u.u_rightEar, rear?.x ?? 0, rear?.y ?? 0, rear?.w ?? 0, rear?.h ?? 0);
+    gl.uniform1f(u.u_earL, state.earLeft);
+    gl.uniform1f(u.u_earR, state.earRight);
+
     gl.uniform2f(u.u_chest, anchors.chest.x, anchors.chest.y);
 
     gl.uniform1i(u.u_bgMode, BG_MODES[background.id] ?? 1);
@@ -617,7 +653,7 @@ export class FrameRenderer {
     const { gl } = this;
     gl.deleteTexture(this.texSource);
     gl.deleteTexture(this.texCutout);
-    gl.deleteTexture(this.texBlurred);
+    gl.deleteTexture(this.texPlate);
     gl.deleteProgram(this.program);
     // Frees the backing drawing buffer immediately rather than waiting for GC,
     // which matters because browsers cap the number of live WebGL contexts.

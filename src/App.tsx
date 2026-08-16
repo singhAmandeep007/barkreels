@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Settings, Sparkles, Dog, Mic, ArrowLeft, Film, Layers } from "lucide-react";
-import confetti from "canvas-confetti";
 
 import { SettingsModal } from "./components/SettingsModal";
 import { DropZone } from "./components/DropZone";
-import { ScriptEditor } from "./components/ScriptEditor";
+import { DogInsights } from "./components/DogInsights";
+import { VoicePanel } from "./components/VoicePanel";
 import { StepIndicator } from "./components/StepIndicator";
 import { StudioPreview } from "./components/StudioPreview";
 import { StudioControls } from "./components/StudioControls";
@@ -20,13 +20,15 @@ import {
   DEFAULT_BACKGROUND,
   DEFAULT_CAPTIONS,
   DEFAULT_EXPORT,
+  DEFAULT_VOICE,
   VOICE_MAP,
   type ApiKeys,
   type BackgroundConfig,
   type CaptionConfig,
-  type DogAnalysis,
   type ExportConfig,
   type RigConfig,
+  type VoiceConfig,
+  type WordTimestamp,
   type VideoProject,
 } from "./types";
 
@@ -68,6 +70,7 @@ const emptyProject = (): VideoProject => ({
   envelope: null,
   status: "idle",
   error: null,
+  usedOwnRecording: false,
 });
 
 export default function App() {
@@ -76,7 +79,11 @@ export default function App() {
   const [background, setBackground] = useLocalStorage<BackgroundConfig>("barkreels-background", DEFAULT_BACKGROUND);
   const [exportConfig, setExportConfig] = useLocalStorage<ExportConfig>("barkreels-export", DEFAULT_EXPORT);
 
-  const [rigConfig, setRigConfig] = useState<RigConfig>(PRESETS.idle);
+  // `still` is the default: for a portrait photo it's the most convincing
+  // result, and it's the one style that can't look like a photo being waved
+  // around. Users who want motion go looking for it.
+  const [rigConfig, setRigConfig] = useState<RigConfig>(PRESETS.still);
+  const [voice, setVoice] = useState<VoiceConfig>(DEFAULT_VOICE);
   const [showSettings, setShowSettings] = useState(false);
   const [project, setProject] = useState<VideoProject>(emptyProject);
   const [segmentLabel, setSegmentLabel] = useState("");
@@ -151,7 +158,9 @@ export default function App() {
       // they overlap almost perfectly - running them concurrently costs about
       // as long as the slower one alone.
       const [analysis, layers] = await Promise.all([
-        analyzeDogImage(file, apiKeys),
+        // Only ask the model to write when the user wants it to. If they're
+        // supplying a script or a recording, those fields are dead weight.
+        analyzeDogImage(file, apiKeys, voice.source === "persona"),
         (async () => {
           setProject((prev) => ({ ...prev, status: "segmenting" }));
           return segmentImage(file, (p) => {
@@ -180,38 +189,54 @@ export default function App() {
         error: err instanceof Error ? err.message : "Analysis failed.",
       }));
     }
-  }, [project.imageFiles, project.activeImageIndex, apiKeys]);
+  }, [project.imageFiles, project.activeImageIndex, apiKeys, voice.source]);
 
-  const handleUpdateAnalysis = useCallback((analysis: DogAnalysis) => {
-    setProject((prev) => ({ ...prev, analysis }));
-  }, []);
-
-  /* --- Voice + envelope ----------------------------------------------- */
+  /* --- Voice ---------------------------------------------------------- *
+   * Three paths converge on the same shape: an audio blob, a duration, an
+   * envelope, and (only for TTS) word timestamps. Everything downstream
+   * reads that shape and never asks where the audio came from.            */
   const handleGenerateVoice = useCallback(async () => {
-    if (!project.analysis) return;
-    if (!apiKeys.elevenLabsKey) {
-      setShowSettings(true);
-      return;
-    }
-
     setProject((prev) => ({ ...prev, status: "generating-voice", error: null }));
 
     try {
-      const voiceId = VOICE_MAP[project.analysis.suggestedVoice] ?? VOICE_MAP.playful;
-      const ttsResult = await generateSpeech(project.analysis.monologue, voiceId, apiKeys.elevenLabsKey);
+      let audioBlob: Blob;
+      let audioUrl: string;
+      let wordTimestamps: WordTimestamp[] = [];
 
-      // Word timestamps stop at the last syllable; the real file usually has a
-      // tail of silence. Using the decoded duration stops the export cutting
-      // the last word short.
+      if (voice.source === "record") {
+        // The recording is the voiceover. ElevenLabs is not involved at all,
+        // which also means there are no word timings and so no subtitles.
+        if (!voice.recording) throw new Error("Record or upload some audio first.");
+        audioBlob = voice.recording;
+        audioUrl = voice.recordingUrl || URL.createObjectURL(voice.recording);
+      } else {
+        if (!apiKeys.elevenLabsKey) {
+          setShowSettings(true);
+          setProject((prev) => ({ ...prev, status: "idle" }));
+          return;
+        }
+        const script = voice.script.trim();
+        if (!script) throw new Error("Write something for your dog to say first.");
+
+        const tts = await generateSpeech(script, VOICE_MAP[voice.persona], apiKeys.elevenLabsKey);
+        audioBlob = tts.audioBlob;
+        audioUrl = tts.audioUrl;
+        wordTimestamps = tts.wordTimestamps;
+      }
+
+      // Word timestamps stop at the last syllable, and a recording has none at
+      // all, so the decoded duration is the only reliable length. Without it
+      // the export truncates the tail.
       const [envelope, durationMs] = await Promise.all([
-        analyzeAudio(ttsResult.audioBlob),
-        getAudioDurationMs(ttsResult.audioBlob),
+        analyzeAudio(audioBlob),
+        getAudioDurationMs(audioBlob),
       ]);
 
       setProject((prev) => ({
         ...prev,
-        ttsResult: { ...ttsResult, durationMs: Math.max(ttsResult.durationMs, durationMs) },
+        ttsResult: { audioBlob, audioUrl, wordTimestamps, durationMs },
         envelope,
+        usedOwnRecording: voice.source === "record",
         status: "previewing",
       }));
     } catch (err) {
@@ -221,16 +246,10 @@ export default function App() {
         error: err instanceof Error ? err.message : "Voice generation failed.",
       }));
     }
-  }, [project.analysis, apiKeys.elevenLabsKey]);
+  }, [voice, apiKeys.elevenLabsKey]);
 
   const handleExported = useCallback(() => {
     setProject((prev) => ({ ...prev, status: "done" }));
-    confetti({
-      particleCount: 140,
-      spread: 85,
-      origin: { y: 0.6 },
-      colors: ["#fbbf24", "#f97316", "#ef4444", "#a855f7"],
-    });
   }, []);
 
   const anchors = useMemo(() => {
@@ -240,6 +259,9 @@ export default function App() {
 
   const isAnalyzing = project.status === "analyzing" || project.status === "segmenting";
   const isGeneratingVoice = project.status === "generating-voice";
+  // Subtitles require per-word timings, which only TTS produces.
+  const captionsAvailable = (project.ttsResult?.wordTimestamps.length ?? 0) > 0;
+
   const readyToRender = !!(project.ttsResult && project.layers && anchors && project.analysis);
 
   const fileLabel = useMemo(() => {
@@ -338,12 +360,7 @@ export default function App() {
                 </button>
 
                 {project.analysis && (
-                  <ScriptEditor
-                    analysis={project.analysis}
-                    onUpdate={handleUpdateAnalysis}
-                    onRegenerate={handleAnalyze}
-                    isLoading={isAnalyzing}
-                  />
+                  <DogInsights analysis={project.analysis} locked={!!project.ttsResult} />
                 )}
               </div>
 
@@ -365,16 +382,17 @@ export default function App() {
                     onAction={handleAnalyze}
                   />
                 ) : !project.ttsResult ? (
-                  <ActionCard
-                    icon={<Mic className="h-5 w-5 text-amber-500" />}
-                    title="Give them a voice"
-                    body="ElevenLabs returns the audio plus character-level timestamps. Those drive the subtitles, and the loudness envelope drives the jaw."
-                    ctaLabel="Generate voiceover"
-                    busyLabel="Synthesising…"
+                  <VoicePanel
+                    analysis={project.analysis}
+                    voice={voice}
+                    onChange={setVoice}
+                    onGenerate={handleGenerateVoice}
                     busy={isGeneratingVoice}
-                    ready={keysReady}
+                    busyLabel="Synthesising…"
+                    // A recording needs no ElevenLabs key at all, so don't
+                    // gate that path behind one.
+                    ready={voice.source === "record" ? true : keysReady}
                     onOpenSettings={() => setShowSettings(true)}
-                    onAction={handleGenerateVoice}
                   />
                 ) : (
                   <StudioControls
@@ -382,6 +400,7 @@ export default function App() {
                     onRigChange={setRigConfig}
                     captions={captions}
                     onCaptionsChange={setCaptions}
+                    captionsAvailable={captionsAvailable}
                     background={background}
                     onBackgroundChange={setBackground}
                     exportConfig={exportConfig}
@@ -402,7 +421,7 @@ export default function App() {
                     audioUrl={project.ttsResult!.audioUrl}
                     durationSec={project.ttsResult!.durationMs / 1000}
                     rigConfig={rigConfig}
-                    captions={captions}
+                    captions={captionsAvailable ? captions : { ...captions, enabled: false }}
                     background={background}
                     exportConfig={exportConfig}
                     fileLabel={fileLabel}

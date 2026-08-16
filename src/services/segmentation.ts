@@ -206,11 +206,20 @@ export function deriveAnchors(box: NormBox | null): DogAnchors {
   const eyeH = head.h * 0.12;
   const eyeY = head.y + head.h * 0.3;
 
+  // Ears sit on the outer top corners of the skull and extend above it. The
+  // negative y offset is deliberate: on most breeds the ear tips clear the
+  // top of the head box the model reports.
+  const earW = head.w * 0.26;
+  const earH = head.h * 0.42;
+  const earY = head.y - head.h * 0.1;
+
   return {
     head,
     mouth,
     leftEye: { x: head.x + head.w * 0.2, y: eyeY, w: eyeW, h: eyeH },
     rightEye: { x: head.x + head.w * 0.64, y: eyeY, w: eyeW, h: eyeH },
+    leftEar: { x: head.x - earW * 0.15, y: earY, w: earW, h: earH },
+    rightEar: { x: head.x + head.w - earW * 0.85, y: earY, w: earW, h: earH },
     chest: { x: b.x + b.w * 0.5, y: b.y + b.h * 0.72 },
   };
 }
@@ -238,6 +247,8 @@ export function reconcileAnchors(fromModel: DogAnchors | null, fromMask: DogAnch
     mouth: valid(fromModel.mouth) ? fromModel.mouth : fromMask.mouth,
     leftEye: valid(fromModel.leftEye) ? fromModel.leftEye : fromMask.leftEye,
     rightEye: valid(fromModel.rightEye) ? fromModel.rightEye : fromMask.rightEye,
+    leftEar: valid(fromModel.leftEar) ? fromModel.leftEar : fromMask.leftEar,
+    rightEar: valid(fromModel.rightEar) ? fromModel.rightEar : fromMask.rightEar,
     chest:
       fromModel.chest &&
       fromModel.chest.x >= 0 &&

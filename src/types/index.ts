@@ -20,6 +20,9 @@ export interface DogAnchors {
   mouth: NormBox;
   leftEye: NormBox | null;
   rightEye: NormBox | null;
+  /** Ears twitch independently — the cheapest signal that a still dog is alive. */
+  leftEar: NormBox | null;
+  rightEar: NormBox | null;
   /** Rough pivot the body rotates about when rolling/bouncing. */
   chest: { x: number; y: number };
 }
@@ -41,6 +44,20 @@ export interface DogAnalysis {
  * ------------------------------------------------------------------ */
 
 export type VoicePersonaId = "deep" | "playful" | "dramatic" | "sassy";
+
+/**
+ * Where the voiceover comes from.
+ *
+ * `persona`  the vision model writes the monologue and picks a voice
+ * `text`     the user writes the script; ElevenLabs speaks it
+ * `record`   the user's own recording is embedded directly — ElevenLabs is
+ *            not called at all
+ *
+ * `record` therefore has no word timestamps, so subtitles are unavailable for
+ * it. The mouth still animates: the jaw is driven by the recording's loudness
+ * envelope, which needs no transcript.
+ */
+export type VoiceSource = "persona" | "text" | "record";
 
 export interface WordTimestamp {
   word: string;
@@ -84,11 +101,27 @@ export interface LayerSet {
   height: number;
 }
 
+/** Voice configuration, independent of which source produced the audio. */
+export interface VoiceConfig {
+  source: VoiceSource;
+  persona: VoicePersonaId;
+  /** The script actually sent to TTS. Ignored when `source` is `record`. */
+  script: string;
+  /** User-supplied recording. Only set when `source` is `record`. */
+  recording: Blob | null;
+  recordingUrl: string;
+}
+
 /* ------------------------------------------------------------------ *
  * Animation rig
  * ------------------------------------------------------------------ */
 
-export type PresetId = "idle" | "roll" | "bounce" | "zoomies";
+/**
+ * `still` and `subtle` are talking-head styles: the body and camera hold
+ * position and only the anchors move, so it reads as a relaxed dog actually
+ * speaking rather than a photo being waved around.
+ */
+export type PresetId = "still" | "subtle" | "idle" | "roll" | "bounce" | "zoomies";
 
 /**
  * Tunable coefficients for the animation formula. Every field maps to a
@@ -125,6 +158,11 @@ export interface RigConfig {
   /** Mean seconds between blinks (Poisson rate is 1/this). */
   blinkIntervalSec: number;
 
+  /** Peak ear lift as a fraction of ear-box height. */
+  earTwitchAmp: number;
+  /** Mean seconds between ear twitches. */
+  earTwitchIntervalSec: number;
+
   /** Ken Burns start/end zoom, plus handheld shake amplitude. */
   zoomStart: number;
   zoomEnd: number;
@@ -158,6 +196,9 @@ export interface RigState {
   bgY: number;
   roll: number;
   hop: number;
+  /** Independent per-ear lift, so they never twitch in unison. */
+  earLeft: number;
+  earRight: number;
   /** Raw envelope value at this instant, handy for reactive backgrounds. */
   energy: number;
 }
@@ -232,6 +273,8 @@ export interface VideoProject {
   envelope: AudioEnvelope | null;
   status: ProjectStatus;
   error: string | null;
+  /** Set when the voiceover is the user's own recording rather than TTS. */
+  usedOwnRecording: boolean;
 }
 
 export type AiProvider = "gemini" | "ollama";
@@ -280,6 +323,14 @@ export const DEFAULT_CAPTIONS: CaptionConfig = {
   textColor: "#FFFFFF",
   windowSize: 5,
   uppercase: true,
+};
+
+export const DEFAULT_VOICE: VoiceConfig = {
+  source: "persona",
+  persona: "playful",
+  script: "",
+  recording: null,
+  recordingUrl: "",
 };
 
 export const DEFAULT_BACKGROUND: BackgroundConfig = {

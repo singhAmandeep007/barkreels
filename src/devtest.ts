@@ -151,9 +151,9 @@ async function main() {
     anchors,
     words: makeWords(DURATION),
     envelope,
-    rigConfig: PRESETS.bounce,
+    rigConfig: PRESETS.still,
     captions: DEFAULT_CAPTIONS,
-    background: { ...DEFAULT_BACKGROUND, id: "sunset" },
+    background: { ...DEFAULT_BACKGROUND, id: "blur" },
     durationSec: DURATION,
     width: W,
     height: H,
@@ -164,18 +164,24 @@ async function main() {
   let jawMin = 1,
     jawMax = 0,
     blinkMax = 0,
-    nodAbs = 0;
+    nodAbs = 0,
+    earMax = 0,
+    swayAbs = 0;
   for (let i = 0; i <= 600; i++) {
     const p = renderer.poseAt((i / 600) * DURATION);
     jawMin = Math.min(jawMin, p.jaw);
     jawMax = Math.max(jawMax, p.jaw);
     blinkMax = Math.max(blinkMax, p.blink);
     nodAbs = Math.max(nodAbs, Math.abs(p.nod));
+    earMax = Math.max(earMax, p.earLeft, p.earRight);
+    swayAbs = Math.max(swayAbs, Math.abs(p.swayX), Math.abs(p.swayY));
   }
   log(
-    `rig - jaw ${jawMin.toFixed(3)}..${jawMax.toFixed(3)}, blink max ${blinkMax.toFixed(2)}, nod max ${nodAbs.toFixed(3)}`,
-    jawMax > 0.15 && blinkMax > 0.9 && nodAbs > 0.01 ? "ok" : "bad"
+    `rig - jaw ${jawMin.toFixed(3)}..${jawMax.toFixed(3)}, blink ${blinkMax.toFixed(2)}, nod ${nodAbs.toFixed(3)}, ear ${earMax.toFixed(3)}`,
+    jawMax > 0.15 && blinkMax > 0.9 && earMax > 0.05 ? "ok" : "bad"
   );
+  // The entire point of `still`: the body must not move, at all.
+  log(`still preset: body sway ${swayAbs.toFixed(5)} (must be exactly 0)`, swayAbs === 0 ? "ok" : "bad");
 
   // Determinism: the whole design rests on this.
   const a = renderer.poseAt(2.5),
@@ -211,9 +217,9 @@ async function main() {
     anchors,
     words: makeWords(DURATION),
     envelope,
-    rigConfig: PRESETS.bounce,
+    rigConfig: PRESETS.still,
     captions: DEFAULT_CAPTIONS,
-    background: { ...DEFAULT_BACKGROUND, id: "sunset" },
+    background: { ...DEFAULT_BACKGROUND, id: "blur" },
     durationSec: DURATION,
     width: 1080,
     height: 1920,

@@ -136,6 +136,9 @@ const BASE: RigConfig = {
 
   blinkIntervalSec: 3.5,
 
+  earTwitchAmp: 0.18,
+  earTwitchIntervalSec: 4.5,
+
   zoomStart: 1.0,
   zoomEnd: 1.14,
   shakeAmp: 0.004,
@@ -150,6 +153,55 @@ const BASE: RigConfig = {
 };
 
 export const PRESETS: Record<PresetId, RigConfig> = {
+  /**
+   * Locked off. The frame, the camera and the body do not move at all — only
+   * the mouth, eyes and ears.
+   *
+   * This is the most convincing style for a portrait, and the reason is
+   * counterintuitive: motion is what gives away that a photo is being puppeted.
+   * Hold everything still and the viewer reads the frame as a real video of a
+   * dog sitting calmly, so the only thing left to judge is the mouth — which
+   * is the one part we drive from real audio. Breathing stays, very slightly,
+   * because a perfectly rigid subject reads as a freeze-frame.
+   */
+  still: {
+    ...BASE,
+    preset: 'still',
+    swayAmp: 0,
+    tiltAmp: 0,
+    rollAmp: 0,
+    hopAmp: 0,
+    shakeAmp: 0,
+    parallax: 0,
+    zoomStart: 1.0,
+    zoomEnd: 1.0,
+    breathAmp: 0.004,
+    nodGain: 0.12,
+    earTwitchAmp: 0.22,
+    earTwitchIntervalSec: 3.8,
+  },
+
+  /**
+   * Still, plus the smallest amount of life: a barely perceptible drift and a
+   * very slow push-in. Everything an inch from imperceptible, which is where
+   * cinematography puts idle motion.
+   */
+  subtle: {
+    ...BASE,
+    preset: 'subtle',
+    swayAmp: 0.004,
+    tiltAmp: 0.008,
+    rollAmp: 0,
+    hopAmp: 0,
+    shakeAmp: 0.0008,
+    parallax: 0.12,
+    zoomStart: 1.0,
+    zoomEnd: 1.035,
+    breathAmp: 0.008,
+    nodGain: 0.3,
+    earTwitchAmp: 0.2,
+  },
+
   /** Portrait mode: the dog talks to camera, everything else stays subtle. */
   idle: { ...BASE },
 
@@ -215,6 +267,7 @@ export function applyEnergy(config: RigConfig, energy: number): RigConfig {
     nodGain: config.nodGain * gain,
     breathHz: config.breathHz * (0.85 + e * 0.4),
     blinkIntervalSec: config.blinkIntervalSec * (1.3 - e * 0.5),
+    earTwitchIntervalSec: config.earTwitchIntervalSec * (1.4 - e * 0.6),
   };
 }
 
@@ -227,10 +280,61 @@ export interface RigTables {
   nod: Float32Array;
   /** Eyelid closure in [0..1] sampled at `rate` Hz. */
   blink: Float32Array;
+  /** Per-ear lift in [0..1]. Separate tables so the ears act independently. */
+  earLeft: Float32Array;
+  earRight: Float32Array;
   rate: number;
   noiseX: (x: number) => number;
   noiseY: (x: number) => number;
   durationSec: number;
+}
+
+/**
+ * Ear twitches: Poisson events with a springy, overshooting flick.
+ *
+ * Ears are the highest-value motion on an otherwise still dog. They're light,
+ * so they move fast and settle with a visible wobble, and dogs twitch them
+ * constantly while listening — which is exactly the read we want when a voice
+ * is coming out of the animal.
+ *
+ * Seeded differently per side so the two never fire together; synchronised
+ * ears look like a hat being lifted rather than an animal listening.
+ */
+function precomputeEarTwitch(
+  intervalSec: number,
+  durationSec: number,
+  rate: number,
+  seed: number
+): Float32Array {
+  const steps = Math.max(1, Math.ceil(durationSec * rate));
+  const out = new Float32Array(steps);
+  const rand = mulberry32(seed);
+
+  const lambda = 1 / Math.max(0.5, intervalSec);
+  const FLICK_SEC = 0.42;
+
+  let t = -Math.log(1 - rand()) / lambda;
+
+  while (t < durationSec) {
+    const start = Math.floor(t * rate);
+    const len = Math.max(1, Math.round(FLICK_SEC * rate));
+    // Vary each flick so repeated twitches don't look copy-pasted.
+    const strength = 0.6 + rand() * 0.4;
+
+    for (let i = 0; i < len; i++) {
+      const idx = start + i;
+      if (idx < 0 || idx >= steps) continue;
+
+      // Decaying oscillation: sharp up, then two diminishing wobbles.
+      const p = i / len;
+      const value = Math.sin(p * Math.PI * 2.5) * Math.exp(-p * 4.2);
+      out[idx] = Math.max(out[idx], Math.max(0, value) * strength);
+    }
+
+    t += -Math.log(1 - rand()) / lambda;
+  }
+
+  return out;
 }
 
 /**
@@ -388,6 +492,12 @@ export function buildRigTables(
   return {
     nod: precomputeNod(config, envelope, durationSec, rate),
     blink: precomputeBlinks(config, durationSec, rate, seed),
+    earLeft: precomputeEarTwitch(
+      config.earTwitchIntervalSec, durationSec, rate, seed ^ 0x1e47
+    ),
+    earRight: precomputeEarTwitch(
+      config.earTwitchIntervalSec, durationSec, rate, seed ^ 0x7c19
+    ),
     rate,
     noiseX: makeValueNoise(seed ^ 0x9e37),
     noiseY: makeValueNoise(seed ^ 0x85eb),
@@ -447,6 +557,12 @@ export function evaluateRig(t: number, config: RigConfig, envelope: AudioEnvelop
   /* --- Blink: precomputed Poisson process -------------------------- */
   const blink = clamp01(sampleTable(tables.blink, tables.rate, t));
 
+  /* --- Ears: independent Poisson flicks ---------------------------- */
+  const earLeft =
+    config.earTwitchAmp * sampleTable(tables.earLeft, tables.rate, t);
+  const earRight =
+    config.earTwitchAmp * sampleTable(tables.earRight, tables.rate, t);
+
   /* --- Camera: eased Ken Burns + two-octave handheld noise ---------- */
   const zoom = config.zoomStart + (config.zoomEnd - config.zoomStart) * easeInOutCubic(progress);
 
@@ -483,6 +599,8 @@ export function evaluateRig(t: number, config: RigConfig, envelope: AudioEnvelop
     bgY,
     roll,
     hop,
+    earLeft,
+    earRight,
     energy: E,
   };
 }
