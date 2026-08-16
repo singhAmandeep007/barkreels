@@ -54,7 +54,7 @@ jobs:
         env:
           # Derived from the repo name so a rename cannot break the asset paths.
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
-          VITE_OLLAMA_PROXY: "true"
+          VITE_OLLAMA_PROXY: "false"
       - name: Setup Pages
         uses: actions/configure-pages@v4
       - name: Upload artifact
