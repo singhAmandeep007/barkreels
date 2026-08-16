@@ -229,9 +229,9 @@ Enable Pages in repo settings with **Source: GitHub Actions**, then push.
 
 Two build-time variables make Pages work:
 
-| Variable | Why |
-|---|---|
-| `VITE_BASE_PATH` | Pages serves a project site from `/<repo>/`, not the domain root. Without this every asset 404s and the page renders blank. Derived from the repo name in the workflow. |
+| Variable                  | Why                                                                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_BASE_PATH`          | Pages serves a project site from `/<repo>/`, not the domain root. Without this every asset 404s and the page renders blank. Derived from the repo name in the workflow.   |
 | `VITE_OLLAMA_PROXY=false` | Pages has no rewrite layer, so the same-origin `/ollama-api` path cannot exist. The build hides the Ollama provider rather than offering one that fails on every request. |
 
 **Gemini works fine on Pages.** It is called directly and sends its own CORS

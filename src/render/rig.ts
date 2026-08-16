@@ -113,7 +113,14 @@ function sampleEnvelope(env: AudioEnvelope | null, t: number): number {
 const BASE: RigConfig = {
   preset: "idle",
 
-  jawMax: 0.42,
+  // Peak jaw drop as a fraction of the hinge-to-chin distance.
+  //
+  // Deliberately conservative. Conversational speech opens a jaw far less than
+  // people expect, and an overdriven mouth is the first thing that reads as
+  // fake on a still photo: it stops looking like talking and starts looking
+  // like chewing. Understated is the better first impression, and the slider
+  // goes to 0.9 for anyone who wants more.
+  jawMax: 0.26,
   jawGateLow: 0.08,
   jawGateHigh: 0.55,
 
