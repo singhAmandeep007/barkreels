@@ -184,7 +184,7 @@ the subtitles and the mouth animation.
 
 Cloud only; there is no local-instance mode. The model list is discovered from
 `/api/tags` at runtime rather than hardcoded, and filtered to vision-capable
-models — Cloud serves a small catalogue of large models, and the popular local
+models - Cloud serves a small catalogue of large models, and the popular local
 vision models (`qwen3-vl`, `llama3.2-vision`) are **not** in it. `gemma4:31b`
 is the lightest cloud vision option and the default.
 

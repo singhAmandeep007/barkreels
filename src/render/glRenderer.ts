@@ -549,11 +549,9 @@ export class FrameRenderer {
         buildBackgroundPlate(layers.source, layers.cutout, {
           blurPx: background.blurPx,
           // Selecting "your own" before uploading anything leaves nothing to
-          // draw, so fall back to the blurred photo until an image exists —
+          // draw, so fall back to the blurred photo until an image exists -
           // the tile then previews as something rather than as a black frame.
-          blur:
-            background.id === "blur" ||
-            (background.id === "custom" && !isDrawable(background.customImage)),
+          blur: background.id === "blur" || (background.id === "custom" && !isDrawable(background.customImage)),
           customImage: background.id === "custom" ? background.customImage : null,
         })
       );

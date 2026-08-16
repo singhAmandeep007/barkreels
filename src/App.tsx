@@ -39,18 +39,14 @@ import {
  * State that survives a reload.
  *
  * `transient` names fields that must never be written to storage. This is not
- * an optimisation — it's a correctness requirement. Live objects like
+ * an optimisation - it's a correctness requirement. Live objects like
  * `ImageBitmap` and blob: URLs serialise to `{}` and to dead strings, and both
  * come back *truthy but invalid*, which is far worse than coming back missing:
  * the app confidently hands `{}` to `drawImage` and throws inside canvas, with
  * a stack that points at the renderer rather than at the storage that caused
  * it. Stripping them on write means a reload degrades to the default instead.
  */
-function useLocalStorage<T extends object>(
-  key: string,
-  initial: T,
-  transient: (keyof T)[] = []
-): [T, (v: T) => void] {
+function useLocalStorage<T extends object>(key: string, initial: T, transient: (keyof T)[] = []): [T, (v: T) => void] {
   const [value, setValue] = useState<T>(() => {
     try {
       const stored = window.localStorage.getItem(key);
@@ -101,13 +97,12 @@ const emptyProject = (): VideoProject => ({
 export default function App() {
   const [apiKeys, setApiKeys] = useLocalStorage<ApiKeys>("barkreels-api-keys", DEFAULT_API_KEYS);
   const [captions, setCaptions] = useLocalStorage<CaptionConfig>("barkreels-captions", DEFAULT_CAPTIONS);
-  // customImage is an ImageBitmap and customUrl is a blob: URL — neither
+  // customImage is an ImageBitmap and customUrl is a blob: URL - neither
   // survives a reload, so neither may be written to storage.
-  const [background, setBackground] = useLocalStorage<BackgroundConfig>(
-    "barkreels-background",
-    DEFAULT_BACKGROUND,
-    ["customImage", "customUrl"]
-  );
+  const [background, setBackground] = useLocalStorage<BackgroundConfig>("barkreels-background", DEFAULT_BACKGROUND, [
+    "customImage",
+    "customUrl",
+  ]);
   const [exportConfig, setExportConfig] = useLocalStorage<ExportConfig>("barkreels-export", DEFAULT_EXPORT);
 
   // `still` is the default: for a portrait photo it's the most convincing

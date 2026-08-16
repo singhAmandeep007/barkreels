@@ -150,7 +150,7 @@ export function buildBackgroundPlate(
   //
   // The truthiness check has to be a real type check, not `if (customImage)`.
   // Background config is persisted to localStorage, and an ImageBitmap survives
-  // JSON.stringify as `{}` — truthy, and fatal the moment drawImage sees it.
+  // JSON.stringify as `{}` - truthy, and fatal the moment drawImage sees it.
   // The config layer strips it on save now, but a plate that throws takes the
   // whole preview down with it, so this stays as a second line of defence.
   if (isDrawable(options.customImage)) {

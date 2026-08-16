@@ -5,7 +5,7 @@ import { AlertTriangle, RotateCcw } from "lucide-react";
  * Catches render-path failures so they don't take the page with them.
  *
  * The renderer touches a lot of browser surface that throws rather than
- * returning errors — canvas `drawImage`, WebGL context creation, WebCodecs.
+ * returning errors - canvas `drawImage`, WebGL context creation, WebCodecs.
  * React's default for an uncaught error in a subtree is to unmount the entire
  * root, so a single bad texture turned the whole app into a blank page and
  * took the user's uploaded photo, analysis and generated audio with it.
@@ -16,7 +16,7 @@ import { AlertTriangle, RotateCcw } from "lucide-react";
  */
 interface Props {
   children: ReactNode;
-  /** Changing this resets the boundary — e.g. when the user picks a new photo. */
+  /** Changing this resets the boundary - e.g. when the user picks a new photo. */
   resetKey?: string;
 }
 
@@ -53,12 +53,10 @@ export class RenderErrorBoundary extends Component<Props, State> {
           The preview stopped
         </h3>
         <p className="text-[11px] text-gray-400 leading-relaxed">
-          Something in the render path failed. Your photo, analysis and audio are
-          all still here — changing a setting is usually enough to recover.
+          Something in the render path failed. Your photo, analysis and audio are all still here - changing a setting is
+          usually enough to recover.
         </p>
-        <p className="text-[10px] text-gray-600 font-mono break-words leading-relaxed">
-          {this.state.error.message}
-        </p>
+        <p className="text-[10px] text-gray-600 font-mono break-words leading-relaxed">{this.state.error.message}</p>
         <button
           onClick={() => this.setState({ error: null })}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gray-900/60 border border-white/5 text-xs font-bold text-gray-300 hover:text-white transition-colors"

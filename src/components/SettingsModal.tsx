@@ -41,7 +41,7 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
   }, [draft.ollamaKey]);
 
   /**
-   * Refetch when the panel opens or the key changes, debounced — the key field
+   * Refetch when the panel opens or the key changes, debounced - the key field
    * fires on every keystroke and a half-typed key is not worth a request.
    */
   useEffect(() => {

@@ -7,8 +7,8 @@
  *   Gemini  Called directly from the browser. Google's generativelanguage
  *           endpoint sends permissive CORS headers, so no proxy is needed.
  *
- *   Ollama  Ollama Cloud only. It does *not* send CORS headers — its OPTIONS
- *           handler returns 405 — so every call is routed through a
+ *   Ollama  Ollama Cloud only. It does *not* send CORS headers - its OPTIONS
+ *           handler returns 405 - so every call is routed through a
  *           same-origin `/ollama-api` path that Vite rewrites in dev and the
  *           static host rewrites in production. Pure config, no server code;
  *           see vite.config.ts, public/_redirects and vercel.json.
@@ -261,7 +261,7 @@ async function analyzeWithGemini(
  *
  * ollama.com returns 405 on OPTIONS and sends no CORS headers, so the browser
  * refuses the preflight for any authenticated JSON POST. A host rewrite maps
- * this path onto ollama.com — Vite in dev, `_redirects` / `vercel.json` in
+ * this path onto ollama.com - Vite in dev, `_redirects` / `vercel.json` in
  * production. Pure config, no server code, so the app stays client-only.
  */
 export const OLLAMA_ENDPOINT = "/ollama-api";
@@ -394,7 +394,7 @@ async function analyzeWithOllama(
     // the popular local vision models simply aren't in it.
     if (response.status === 404 || /not found/i.test(text)) {
       throw new Error(
-        `Ollama Cloud doesn't host "${model}". It serves a small catalogue of large models — qwen3-vl and llama3.2-vision are local-only and not available here. Open settings and pick from the discovered list; gemma4:31b is the lightest cloud vision option.`
+        `Ollama Cloud doesn't host "${model}". It serves a small catalogue of large models - qwen3-vl and llama3.2-vision are local-only and not available here. Open settings and pick from the discovered list; gemma4:31b is the lightest cloud vision option.`
       );
     }
 
@@ -430,12 +430,7 @@ export async function analyzeDogImage(file: File | Blob, config: ApiKeys, includ
   const provider: AiProvider = config.aiProvider ?? "gemini";
 
   if (provider === "ollama") {
-    return analyzeWithOllama(
-      file,
-      config.ollamaModel || "gemma4:31b",
-      config.ollamaKey ?? "",
-      includeWriting
-    );
+    return analyzeWithOllama(file, config.ollamaModel || "gemma4:31b", config.ollamaKey ?? "", includeWriting);
   }
 
   return analyzeWithGemini(file, config.geminiKey, config.geminiModel || "gemini-flash-latest", includeWriting);
