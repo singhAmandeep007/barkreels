@@ -267,6 +267,20 @@ async function analyzeWithGemini(
 export const OLLAMA_ENDPOINT = "/ollama-api";
 
 /**
+ * Whether this deployment can reach Ollama Cloud at all.
+ *
+ * The rewrite is host configuration, so it exists on Vite's dev server, on
+ * Netlify and on Vercel, but it cannot exist on GitHub Pages: Pages serves
+ * static files and has no rewrite layer. Rather than offer a provider that
+ * would fail on every request there, the Pages build sets this to false and
+ * the UI hides Ollama entirely.
+ *
+ * Gemini is unaffected. It is called directly and sends its own CORS headers,
+ * so it works on any host including Pages.
+ */
+export const OLLAMA_AVAILABLE = import.meta.env.VITE_OLLAMA_PROXY !== "false";
+
+/**
  * Ask the server which models it actually has.
  *
  * Hardcoding model names is how you end up shipping a 404: Ollama Cloud hosts
@@ -427,7 +441,9 @@ async function analyzeWithOllama(
  *   voice. False when the user is supplying their own script or recording.
  */
 export async function analyzeDogImage(file: File | Blob, config: ApiKeys, includeWriting = true): Promise<DogAnalysis> {
-  const provider: AiProvider = config.aiProvider ?? "gemini";
+  // A stored preference for Ollama must not strand the user on a deployment
+  // that has no route to it.
+  const provider: AiProvider = OLLAMA_AVAILABLE ? (config.aiProvider ?? "gemini") : "gemini";
 
   if (provider === "ollama") {
     return analyzeWithOllama(file, config.ollamaModel || "gemma4:31b", config.ollamaKey ?? "", includeWriting);
@@ -438,8 +454,9 @@ export async function analyzeDogImage(file: File | Blob, config: ApiKeys, includ
 
 /** Whether the current settings are complete enough to attempt an analysis. */
 export function hasVisionConfig(config: ApiKeys): boolean {
-  if (config.aiProvider === "ollama") {
+  if (config.aiProvider === "ollama" && OLLAMA_AVAILABLE) {
     return !!config.ollamaModel && !!config.ollamaKey;
   }
+  // Ollama unavailable here, so readiness is decided by the Gemini key.
   return !!config.geminiKey;
 }

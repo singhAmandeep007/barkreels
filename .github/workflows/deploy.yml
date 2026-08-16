@@ -1,0 +1,67 @@
+# Deploy the built app to GitHub Pages.
+#
+# Two things differ from a plain static deploy:
+#
+#   VITE_BASE_PATH    Pages serves a project site from /<repo>/, not from the
+#                     domain root. Vite needs to know, or every asset 404s and
+#                     the page renders blank.
+#
+#   VITE_OLLAMA_PROXY Pages cannot rewrite requests, so the same-origin
+#                     /ollama-api path that Ollama Cloud requires cannot exist
+#                     here. The app hides the Ollama provider rather than
+#                     offering an option that always fails. Gemini is
+#                     unaffected: it is called directly and sends CORS headers.
+name: Deploy static content to Pages
+
+on:
+  # Runs on pushes targeting the default branch
+  push:
+    branches: ["main"]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Sets the GITHUB_TOKEN permissions to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  # Single deploy job since we're just deploying
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+        env:
+          # Derived from the repo name so a rename cannot break the asset paths.
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+          VITE_OLLAMA_PROXY: "true"
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Upload dist folder
+          path: "./dist"
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

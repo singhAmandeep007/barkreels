@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { X, Cloud, ExternalLink, ShieldCheck, RefreshCw, Eye, AlertTriangle } from "lucide-react";
+import { X, ExternalLink, ShieldCheck, RefreshCw, Eye, AlertTriangle } from "lucide-react";
 import type { AiProvider, ApiKeys } from "../types";
-import { listOllamaModels, partitionVisionModels } from "../services/vision";
+import { listOllamaModels, partitionVisionModels, OLLAMA_AVAILABLE } from "../services/vision";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -45,14 +45,14 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
    * fires on every keystroke and a half-typed key is not worth a request.
    */
   useEffect(() => {
-    if (!isOpen || draft.aiProvider !== "ollama") return;
+    if (!isOpen || draft.aiProvider !== "ollama" || !OLLAMA_AVAILABLE) return;
     const timer = setTimeout(refreshModels, 500);
     return () => clearTimeout(timer);
   }, [isOpen, draft.aiProvider, refreshModels]);
 
   if (!isOpen) return null;
 
-  const provider: AiProvider = draft.aiProvider ?? "gemini";
+  const provider: AiProvider = OLLAMA_AVAILABLE ? (draft.aiProvider ?? "gemini") : "gemini";
 
   const set = <K extends keyof ApiKeys>(key: K, value: ApiKeys[K]) => setDraft((prev) => ({ ...prev, [key]: value }));
 
@@ -108,8 +108,10 @@ export function SettingsModal({ isOpen, onClose, apiKeys, onSave }: SettingsModa
         <div className="border-t border-white/5 pt-5 space-y-4">
           <label className="text-sm font-bold text-gray-300 block">Vision model</label>
 
-          <div className="grid grid-cols-2 gap-2">
-            {(["gemini", "ollama"] as AiProvider[]).map((id) => {
+          {/* Ollama needs a same-origin rewrite, which static hosts like GitHub
+              Pages cannot provide. Where it can't work, don't offer it. */}
+          <div className={`grid gap-2 ${OLLAMA_AVAILABLE ? "grid-cols-2" : "grid-cols-1"}`}>
+            {(OLLAMA_AVAILABLE ? (["gemini", "ollama"] as AiProvider[]) : (["gemini"] as AiProvider[])).map((id) => {
               const active = provider === id;
               return (
                 <button

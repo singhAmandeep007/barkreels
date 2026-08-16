@@ -218,6 +218,33 @@ Formats: MP4 / WebM · 1080×1920, 720×1280, 1080×1080 · 24–60fps.
 
 ---
 
+## Deploying
+
+The app is static files. Any static host works.
+
+### GitHub Pages
+
+`.github/workflows/deploy.yml` builds and deploys on every push to `main`.
+Enable Pages in repo settings with **Source: GitHub Actions**, then push.
+
+Two build-time variables make Pages work:
+
+| Variable | Why |
+|---|---|
+| `VITE_BASE_PATH` | Pages serves a project site from `/<repo>/`, not the domain root. Without this every asset 404s and the page renders blank. Derived from the repo name in the workflow. |
+| `VITE_OLLAMA_PROXY=false` | Pages has no rewrite layer, so the same-origin `/ollama-api` path cannot exist. The build hides the Ollama provider rather than offering one that fails on every request. |
+
+**Gemini works fine on Pages.** It is called directly and sends its own CORS
+headers. Only Ollama needs the rewrite.
+
+### Netlify or Vercel
+
+Both support rewrites, so both providers work. `public/_redirects` and
+`vercel.json` are already in the repo, and neither needs a base path since they
+serve from the domain root. No env vars required.
+
+---
+
 ## Segmentation cost
 
 First run downloads **~22MB** of ISNet fp16 weights (fp16 halves full-precision
